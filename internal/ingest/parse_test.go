@@ -1,8 +1,11 @@
 package ingest
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
+	"io"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -45,7 +48,7 @@ func TestParseRSSAndAtom(t *testing.T) {
 		t.Fatalf("published %s", entries[0].Published)
 	}
 	items := EntriesToItems(model.Source{ID: "src_pod", Name: "Latent Space", SourceType: "podcast", DefaultOpenMode: "deeplink"}, entries)
-	if len(items) != 1 || items[0].OpenMode != "deeplink" {
+	if len(items) != 1 || items[0].OpenMode != "reader" || items[0].ActionURL != "https://www.latent.space/p/contact" {
 		t.Fatalf("items %+v", items)
 	}
 	var meta struct {
@@ -142,13 +145,174 @@ func TestEmailsAndAlias(t *testing.T) {
 
 func TestExcerpt(t *testing.T) {
 	text := "Robots that only predict pixels fail at the moment of contact. We train a world model on synchronized vision. The model factors the latent state."
-	got := Excerpt("", "", []byte(`{"kind":"paper","abstract":"`+text+`"}`), "")
+	got := Excerpt("", "", []byte(`{"kind":"paper","abstract":"`+text+`"}`), "", "")
 	if !strings.Contains(got, "contact") || strings.Contains(got, "factors") {
 		t.Fatalf("excerpt %q", got)
 	}
-	if Excerpt("kept", "", nil, "given excerpt") != "given excerpt" {
+	if Excerpt("kept", "", nil, "given excerpt", "") != "given excerpt" {
 		t.Fatal("provided excerpt")
 	}
+	if Excerpt("The Episode.", "", nil, "", "The Episode") != "" {
+		t.Fatal("excerpt duplicated the title")
+	}
+	cleaned := Excerpt("Cities and roads. See omnystudio.com/listener for privacy information. https://sponsor.example/deal?utm_source=podcast&utm_medium=rss", "", nil, "", "Cities")
+	if strings.Contains(strings.ToLower(cleaned), "omnystudio") || strings.Contains(strings.ToLower(cleaned), "utm_") || strings.Contains(cleaned, "sponsor.example") {
+		t.Fatalf("boilerplate excerpt %q", cleaned)
+	}
+	if !strings.Contains(cleaned, "Cities and roads") {
+		t.Fatalf("cleaned %q", cleaned)
+	}
+}
+
+func TestEnclosureFallbackAndAuthor(t *testing.T) {
+	feed := []byte(`<?xml version="1.0"?>
+<rss xmlns:itunes="http://www.itunes.com/dtds/podcast-1.0.dtd">
+  <channel>
+    <item>
+      <title>The one without a link</title>
+      <guid isPermaLink="false">art19-episode-locator://abc</guid>
+      <itunes:author>The Rest Is Politics</itunes:author>
+      <enclosure url="https://traffic.megaphone.fm/EP1.mp3" length="12345" type="audio/mpeg"/>
+      <description>Show notes about the week. See omnystudio.com/listener for privacy information.</description>
+    </item>
+    <item>
+      <title>No guid either</title>
+      <enclosure url="https://traffic.omny.fm/EP2.mp3" length="50" type="audio/mpeg"/>
+    </item>
+  </channel>
+</rss>`)
+	entries, err := ParseFeed(feed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 2 {
+		t.Fatalf("entries %d", len(entries))
+	}
+	if entries[0].Link != "" || entries[0].ID != "art19-episode-locator://abc" || entries[0].Author != "The Rest Is Politics" {
+		t.Fatalf("first %+v", entries[0])
+	}
+	if entries[0].EnclosureURL != "https://traffic.megaphone.fm/EP1.mp3" || entries[0].EnclosureType != "audio/mpeg" || entries[0].EnclosureLength != 12345 {
+		t.Fatalf("enclosure %+v", entries[0])
+	}
+	source := model.Source{ID: "src_trip", Name: "The Rest Is Politics", SourceType: "podcast", DefaultOpenMode: "deeplink", Config: map[string]any{"overcastUrl": "https://overcast.fm/itunes99"}}
+	items := EntriesToItems(source, entries)
+	if len(items) != 2 {
+		t.Fatalf("items %d", len(items))
+	}
+	if items[0].ExternalID != "art19-episode-locator://abc" || items[0].CanonicalURL != "https://traffic.megaphone.fm/EP1.mp3" || items[0].ActionURL != items[0].CanonicalURL {
+		t.Fatalf("identity %+v", items[0])
+	}
+	if items[0].OpenMode != "reader" || items[0].Author != "The Rest Is Politics" {
+		t.Fatalf("mode %+v", items[0])
+	}
+	var meta map[string]any
+	if err := json.Unmarshal(items[0].Metadata, &meta); err != nil || meta["overcastUrl"] != "https://overcast.fm/itunes99" || meta["enclosureUrl"] != "https://traffic.megaphone.fm/EP1.mp3" {
+		t.Fatalf("meta %+v", meta)
+	}
+	if items[1].ExternalID != "https://traffic.omny.fm/EP2.mp3" || items[1].Author != "The Rest Is Politics" {
+		t.Fatalf("cdn author fallback %+v", items[1])
+	}
+	if strings.Contains(strings.ToLower(items[1].Author), "omny.fm") {
+		t.Fatal(items[1].Author)
+	}
+}
+
+func TestStreamLimitAndBackfill(t *testing.T) {
+	now := time.Now().UTC()
+	body := rssFeed(40, func(i int) time.Time {
+		return now.Add(-time.Duration(i) * time.Hour)
+	})
+	tail := strings.Repeat("x", 300<<10)
+	body = append(body[:len(body)-len("</channel></rss>")], []byte(`<item><title>TAIL</title><description>`+tail+`</description></item></channel></rss>`)...)
+	counted := &countReader{r: bytes.NewReader(body)}
+	entries, err := ParseFeedReader(counted, FeedLimit{MaxItems: 25})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 25 || entries[0].Title != "Ep 0" {
+		t.Fatalf("capped %d %s", len(entries), titleOf(entries))
+	}
+	if counted.n >= len(body)/2 {
+		t.Fatalf("read %d of %d bytes", counted.n, len(body))
+	}
+
+	old := rssFeed(30, func(i int) time.Time { return now.AddDate(-2, 0, -i) })
+	lim := FeedLimit{MaxItems: 25, MinItems: 5, FirstSync: true, NotBefore: now.AddDate(0, 0, -60)}
+	entries, err = ParseFeed(old)
+	if err != nil || len(entries) != 30 {
+		t.Fatalf("unlimited %d %v", len(entries), err)
+	}
+	entries, err = ParseFeedReader(bytes.NewReader(old), lim)
+	if err != nil || len(entries) != 5 || entries[0].Title != "Ep 0" {
+		t.Fatalf("old large %+v %v", entryTitles(entries), err)
+	}
+	small := rssFeed(10, func(i int) time.Time { return now.AddDate(-3, 0, -i) })
+	entries, err = ParseFeedReader(bytes.NewReader(small), lim)
+	if err != nil || len(entries) != 10 {
+		t.Fatalf("small old feed %d %v", len(entries), err)
+	}
+	mixed := rssFeed(38, func(i int) time.Time {
+		if i < 8 {
+			return now.AddDate(0, 0, -i)
+		}
+		return now.AddDate(-4, 0, -i)
+	})
+	entries, err = ParseFeedReader(bytes.NewReader(mixed), lim)
+	if err != nil || len(entries) != 8 {
+		t.Fatalf("window %+v %v", entryTitles(entries), err)
+	}
+
+	oldestFirst := rssFeed(30, func(i int) time.Time { return now.AddDate(0, 0, -(29 - i)) })
+	entries, err = ParseFeedReader(bytes.NewReader(oldestFirst), FeedLimit{MaxItems: 25})
+	if err != nil || len(entries) != 25 || entries[0].Title != "Ep 29" {
+		t.Fatalf("newest of oldest-first %+v %v", entryTitles(entries), err)
+	}
+
+	cut := []byte(`<?xml version="1.0"?><rss><channel>
+<item><title>One</title><link>https://example.com/1</link></item>
+<item><title>Two</title><link>https://example.com/2</link></item>
+<item><title>Thr`)
+	entries, err = ParseFeed(cut)
+	if err != nil || len(entries) != 2 {
+		t.Fatalf("truncated %d %v", len(entries), err)
+	}
+}
+
+func rssFeed(n int, when func(int) time.Time) []byte {
+	var b strings.Builder
+	b.WriteString(`<?xml version="1.0"?><rss version="2.0"><channel>`)
+	for i := 0; i < n; i++ {
+		fmt.Fprintf(&b, `<item><title>Ep %d</title><link>https://example.com/%d</link><guid>ep-%d</guid><pubDate>%s</pubDate><description>notes %d</description></item>`,
+			i, i, i, when(i).Format(time.RFC1123Z), i)
+	}
+	b.WriteString(`</channel></rss>`)
+	return []byte(b.String())
+}
+
+func entryTitles(entries []FeedEntry) []string {
+	out := make([]string, len(entries))
+	for i, entry := range entries {
+		out[i] = entry.Title
+	}
+	return out
+}
+
+func titleOf(entries []FeedEntry) string {
+	if len(entries) == 0 {
+		return ""
+	}
+	return entries[0].Title
+}
+
+type countReader struct {
+	r io.Reader
+	n int
+}
+
+func (c *countReader) Read(p []byte) (int, error) {
+	n, err := c.r.Read(p)
+	c.n += n
+	return n, err
 }
 
 func jsonUnmarshal(raw []byte, dest any) error {

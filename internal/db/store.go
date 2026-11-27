@@ -1,10 +1,13 @@
 package db
 
 import (
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"strings"
+	"time"
 
 	"elephant/internal/model"
 )
@@ -17,7 +20,7 @@ SELECT
   i.title, i.author, i.published_at, i.published_day, i.open_mode, i.action_url,
   i.content_markdown, i.plain_text, i.excerpt, i.metadata_json, i.created_at, i.updated_at,
   src.id, src.name, src.source_type, src.folder, src.default_open_mode, src.default_queue,
-  src.feed_url, src.email_alias, src.config_json, src.enabled, src.last_fetched_at, src.etag, src.last_modified, src.created_at, src.updated_at,
+  src.feed_url, src.email_alias, src.config_json, src.enabled, src.last_fetched_at, src.etag, src.last_modified, src.last_error, src.last_status, src.created_at, src.updated_at,
   IFNULL(st.in_later, 0), st.saved_at, st.read_at, IFNULL(st.read_progress, 0),
   (SELECT COUNT(*) FROM highlights h WHERE h.item_id = i.id)
 FROM items i
@@ -106,7 +109,7 @@ INSERT INTO sources (
 func (s *Store) ListSources() ([]model.Source, error) {
 	rows, err := s.SQL.Query(`
 SELECT id, name, source_type, folder, default_open_mode, default_queue,
-  feed_url, email_alias, config_json, enabled, last_fetched_at, etag, last_modified, created_at, updated_at
+  feed_url, email_alias, config_json, enabled, last_fetched_at, etag, last_modified, last_error, last_status, created_at, updated_at
 FROM sources
 ORDER BY name COLLATE NOCASE, id
 `)
@@ -131,7 +134,7 @@ ORDER BY name COLLATE NOCASE, id
 func (s *Store) GetSource(id string) (model.Source, error) {
 	row := s.SQL.QueryRow(`
 SELECT id, name, source_type, folder, default_open_mode, default_queue,
-  feed_url, email_alias, config_json, enabled, last_fetched_at, etag, last_modified, created_at, updated_at
+  feed_url, email_alias, config_json, enabled, last_fetched_at, etag, last_modified, last_error, last_status, created_at, updated_at
 FROM sources WHERE id = ?
 `, id)
 	src, err := scanSource(row)
@@ -144,7 +147,7 @@ FROM sources WHERE id = ?
 func (s *Store) FindSourceByAlias(alias string) (model.Source, error) {
 	row := s.SQL.QueryRow(`
 SELECT id, name, source_type, folder, default_open_mode, default_queue,
-  feed_url, email_alias, config_json, enabled, last_fetched_at, etag, last_modified, created_at, updated_at
+  feed_url, email_alias, config_json, enabled, last_fetched_at, etag, last_modified, last_error, last_status, created_at, updated_at
 FROM sources WHERE lower(email_alias) = lower(?)
 `, strings.TrimSpace(alias))
 	src, err := scanSource(row)
@@ -192,6 +195,9 @@ type SourcePatch struct {
 	ETag            *string
 	LastModified    *string
 	TouchValidators bool
+	LastError       *string
+	LastStatus      *string
+	TouchSyncState  bool
 }
 
 func (s *Store) PatchSource(id string, patch SourcePatch) (model.Source, error) {
@@ -230,6 +236,10 @@ func (s *Store) PatchSource(id string, patch SourcePatch) (model.Source, error) 
 		current.ETag = deref(patch.ETag)
 		current.LastModified = deref(patch.LastModified)
 	}
+	if patch.TouchSyncState {
+		current.LastStatus = deref(patch.LastStatus)
+		current.LastError = deref(patch.LastError)
+	}
 	if current.Config == nil {
 		current.Config = map[string]any{}
 	}
@@ -246,11 +256,12 @@ func (s *Store) PatchSource(id string, patch SourcePatch) (model.Source, error) 
 UPDATE sources SET
   name = ?, folder = ?, default_open_mode = ?, default_queue = ?,
   feed_url = ?, email_alias = ?, config_json = ?, enabled = ?,
-  last_fetched_at = ?, etag = ?, last_modified = ?, updated_at = ?
+  last_fetched_at = ?, etag = ?, last_modified = ?, last_error = ?, last_status = ?, updated_at = ?
 WHERE id = ?
 `, current.Name, current.Folder, current.DefaultOpenMode, current.DefaultQueue,
 		NullString(current.FeedURL), NullString(current.EmailAlias), string(config), enabled,
-		nullablePtr(current.LastFetchedAt), NullString(current.ETag), NullString(current.LastModified), now, id)
+		nullablePtr(current.LastFetchedAt), NullString(current.ETag), NullString(current.LastModified),
+		NullString(current.LastError), NullString(current.LastStatus), now, id)
 	if err != nil {
 		return model.Source{}, err
 	}
@@ -259,7 +270,7 @@ WHERE id = ?
 
 func (s *Store) DeleteSource(id string) error {
 	return s.withTx(func(tx *sql.Tx) error {
-		if _, err := tx.Exec(`DELETE FROM items_fts WHERE item_id IN (SELECT id FROM items WHERE source_id = ?)`, id); err != nil {
+		if _, err := tx.Exec(`DELETE FROM items_fts WHERE rowid IN (SELECT rowid FROM items WHERE source_id = ?)`, id); err != nil {
 			return err
 		}
 		res, err := tx.Exec(`DELETE FROM sources WHERE id = ?`, id)
@@ -313,9 +324,22 @@ SELECT id FROM sources WHERE source_type = 'manual' AND default_queue = 'later' 
 }
 
 func (s *Store) FindItemID(sourceID, externalID, canonical string) (string, error) {
-	var id string
+	return findItemID(s.SQL, sourceID, externalID, canonical)
+}
+
+type rowQuery interface {
+	QueryRow(query string, args ...any) *sql.Row
+}
+
+// findItemID matches (source_id, external_id). It falls back to
+// (source_id, canonical_url) only inside that source, and only when the
+// caller has no distinct external id. A guid that differs from the URL must
+// not collapse episodes that share a show URL, and a URL must never match a
+// row from a different source.
+func findItemID(q rowQuery, sourceID, externalID, canonical string) (string, error) {
 	if sourceID != "" && externalID != "" {
-		err := s.SQL.QueryRow(`SELECT id FROM items WHERE source_id = ? AND external_id = ?`, sourceID, externalID).Scan(&id)
+		var id string
+		err := q.QueryRow(`SELECT id FROM items WHERE source_id = ? AND external_id = ?`, sourceID, externalID).Scan(&id)
 		if err == nil {
 			return id, nil
 		}
@@ -323,8 +347,14 @@ func (s *Store) FindItemID(sourceID, externalID, canonical string) (string, erro
 			return "", err
 		}
 	}
-	if canonical != "" {
-		err := s.SQL.QueryRow(`SELECT id FROM items WHERE canonical_url = ?`, canonical).Scan(&id)
+	if sourceID != "" && canonical != "" && strings.TrimSpace(externalID) == "" {
+		var id string
+		err := q.QueryRow(`
+SELECT id FROM items
+WHERE source_id = ? AND canonical_url = ?
+ORDER BY created_at, id
+LIMIT 1
+`, sourceID, canonical).Scan(&id)
 		if err == nil {
 			return id, nil
 		}
@@ -353,72 +383,231 @@ type ItemWrite struct {
 	Metadata        json.RawMessage
 }
 
-func (s *Store) InsertItem(item ItemWrite, initial *model.InitialState) (model.Item, error) {
-	now := Now()
+type PreparedItem struct {
+	Write   ItemWrite
+	Initial *model.InitialState
+}
+
+type ingestOutcome struct {
+	ID      string
+	Created bool
+}
+
+// CommitIngest writes every item in one transaction. A failure rolls the whole batch back.
+func (s *Store) CommitIngest(items []PreparedItem) ([]model.IngestResult, error) {
+	if len(items) == 0 {
+		return []model.IngestResult{}, nil
+	}
+	outcomes := make([]ingestOutcome, len(items))
 	err := s.withTx(func(tx *sql.Tx) error {
-		_, err := tx.Exec(`
-INSERT INTO items (
-  id, source_id, external_id, canonical_url, discussion_url, title, author,
-  published_at, published_day, open_mode, action_url, content_markdown, plain_text,
-  excerpt, metadata_json, created_at, updated_at
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-`, item.ID, item.SourceID, item.ExternalID, item.CanonicalURL, NullString(item.DiscussionURL),
-			item.Title, item.Author, item.PublishedAt, item.PublishedDay, item.OpenMode, item.ActionURL,
-			NullString(item.ContentMarkdown), item.PlainText, NullString(item.Excerpt), string(item.Metadata), now, now)
-		if err != nil {
-			return err
+		for i, item := range items {
+			id, created, err := upsertTx(tx, item)
+			if err != nil {
+				return err
+			}
+			outcomes[i] = ingestOutcome{ID: id, Created: created}
 		}
-		inLater, savedAt, readAt, progress := stateFromInitial(initial, now)
-		_, err = tx.Exec(`
-INSERT INTO user_item_state (item_id, in_later, saved_at, read_at, read_progress, updated_at)
-VALUES (?, ?, ?, ?, ?, ?)
-`, item.ID, inLater, savedAt, readAt, progress, now)
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]model.IngestResult, len(outcomes))
+	for i, outcome := range outcomes {
+		got, _, _, _, err := s.GetItem(outcome.ID)
 		if err != nil {
-			return err
+			return nil, err
 		}
-		return reindexTx(tx, item.ID)
+		out[i] = model.IngestResult{Item: got, Created: outcome.Created}
+	}
+	return out, nil
+}
+
+func (s *Store) InsertItem(item ItemWrite, initial *model.InitialState) (model.Item, error) {
+	results, err := s.CommitIngest([]PreparedItem{{Write: item, Initial: initial}})
+	if err != nil {
+		return model.Item{}, err
+	}
+	return results[0].Item, nil
+}
+
+func (s *Store) UpdateItem(id string, item ItemWrite, initial *model.InitialState) (model.Item, error) {
+	item.ID = id
+	existing, err := findItemID(s.SQL, item.SourceID, item.ExternalID, "")
+	if err != nil && !errors.Is(err, ErrNotFound) {
+		return model.Item{}, err
+	}
+	if existing == "" {
+		existing = id
+	}
+	var created bool
+	err = s.withTx(func(tx *sql.Tx) error {
+		var err error
+		existing, created, err = upsertTx(tx, PreparedItem{Write: item, Initial: initial})
+		return err
 	})
 	if err != nil {
 		return model.Item{}, err
 	}
-	got, _, _, _, err := s.GetItem(item.ID)
+	_ = created
+	got, _, _, _, err := s.GetItem(existing)
 	return got, err
 }
 
-func (s *Store) UpdateItem(id string, item ItemWrite, initial *model.InitialState) (model.Item, error) {
+func upsertTx(tx *sql.Tx, item PreparedItem) (string, bool, error) {
+	write := item.Write
+	if strings.TrimSpace(string(write.Metadata)) == "" {
+		write.Metadata = json.RawMessage(`{}`)
+	}
+	hash := contentHash(write)
 	now := Now()
-	err := s.withTx(func(tx *sql.Tx) error {
-		_, err := tx.Exec(`
+	existing, err := findItemID(tx, write.SourceID, write.ExternalID, write.CanonicalURL)
+	if err != nil && !errors.Is(err, ErrNotFound) {
+		return "", false, err
+	}
+	if existing == "" && strings.TrimSpace(write.ID) != "" {
+		var id string
+		err = tx.QueryRow(`SELECT id FROM items WHERE id = ?`, write.ID).Scan(&id)
+		if err == nil {
+			existing = id
+		} else if !errors.Is(err, sql.ErrNoRows) {
+			return "", false, err
+		}
+	}
+	if existing != "" {
+		unchanged, err := itemUnchanged(tx, existing, write, hash)
+		if err != nil {
+			return "", false, err
+		}
+		if unchanged {
+			if _, err := tx.Exec(`UPDATE items SET content_hash = ? WHERE id = ? AND (content_hash IS NULL OR content_hash != ?)`, hash, existing, hash); err != nil {
+				return "", false, err
+			}
+			if item.Initial != nil {
+				if _, err := tx.Exec(`
+INSERT INTO user_item_state (item_id, in_later, saved_at, read_at, read_progress, updated_at)
+VALUES (?, 0, NULL, NULL, 0, ?)
+ON CONFLICT(item_id) DO NOTHING
+`, existing, now); err != nil {
+					return "", false, err
+				}
+				if err := applyInitialTx(tx, existing, item.Initial, now); err != nil {
+					return "", false, err
+				}
+			}
+			return existing, false, nil
+		}
+		if _, err := tx.Exec(`
 UPDATE items SET
   discussion_url = ?, title = ?, author = ?, published_at = ?, published_day = ?,
   open_mode = ?, action_url = ?, content_markdown = ?, plain_text = ?, excerpt = ?,
-  metadata_json = ?, updated_at = ?
+  metadata_json = ?, content_hash = ?, updated_at = ?
 WHERE id = ?
-`, NullString(item.DiscussionURL), item.Title, item.Author, item.PublishedAt, item.PublishedDay,
-			item.OpenMode, item.ActionURL, NullString(item.ContentMarkdown), item.PlainText, NullString(item.Excerpt),
-			string(item.Metadata), now, id)
-		if err != nil {
-			return err
+`, NullString(write.DiscussionURL), write.Title, write.Author, write.PublishedAt, write.PublishedDay,
+			write.OpenMode, write.ActionURL, NullString(write.ContentMarkdown), write.PlainText, NullString(write.Excerpt),
+			string(write.Metadata), hash, now, existing); err != nil {
+			return "", false, err
 		}
 		if _, err := tx.Exec(`
 INSERT INTO user_item_state (item_id, in_later, saved_at, read_at, read_progress, updated_at)
 VALUES (?, 0, NULL, NULL, 0, ?)
 ON CONFLICT(item_id) DO NOTHING
-`, id, now); err != nil {
-			return err
+`, existing, now); err != nil {
+			return "", false, err
 		}
-		if initial != nil {
-			if err := applyInitialTx(tx, id, initial, now); err != nil {
-				return err
+		if item.Initial != nil {
+			if err := applyInitialTx(tx, existing, item.Initial, now); err != nil {
+				return "", false, err
 			}
 		}
-		return reindexTx(tx, id)
-	})
-	if err != nil {
-		return model.Item{}, err
+		if err := reindexTx(tx, existing); err != nil {
+			return "", false, err
+		}
+		return existing, false, nil
 	}
-	got, _, _, _, err := s.GetItem(id)
-	return got, err
+	id := strings.TrimSpace(write.ID)
+	if id == "" {
+		return "", false, errors.New("item id is required")
+	}
+	if _, err := tx.Exec(`
+INSERT INTO items (
+  id, source_id, external_id, canonical_url, discussion_url, title, author,
+  published_at, published_day, open_mode, action_url, content_markdown, plain_text,
+  excerpt, metadata_json, content_hash, created_at, updated_at
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+`, id, write.SourceID, write.ExternalID, write.CanonicalURL, NullString(write.DiscussionURL),
+		write.Title, write.Author, write.PublishedAt, write.PublishedDay, write.OpenMode, write.ActionURL,
+		NullString(write.ContentMarkdown), write.PlainText, NullString(write.Excerpt), string(write.Metadata), hash, now, now); err != nil {
+		return "", false, err
+	}
+	inLater, savedAt, readAt, progress := stateFromInitial(item.Initial, now)
+	if _, err := tx.Exec(`
+INSERT INTO user_item_state (item_id, in_later, saved_at, read_at, read_progress, updated_at)
+VALUES (?, ?, ?, ?, ?, ?)
+`, id, inLater, savedAt, readAt, progress, now); err != nil {
+		return "", false, err
+	}
+	if err := reindexTx(tx, id); err != nil {
+		return "", false, err
+	}
+	return id, true, nil
+}
+
+func itemUnchanged(tx *sql.Tx, id string, write ItemWrite, hash string) (bool, error) {
+	var title, author, published, day, mode, action, plain string
+	var storedHash, discussion, markdown, excerpt, meta sql.NullString
+	err := tx.QueryRow(`
+SELECT content_hash, title, author, published_at, published_day, open_mode, action_url,
+  discussion_url, content_markdown, plain_text, excerpt, metadata_json
+FROM items WHERE id = ?
+`, id).Scan(&storedHash, &title, &author, &published, &day, &mode, &action, &discussion, &markdown, &plain, &excerpt, &meta)
+	if err != nil {
+		return false, err
+	}
+	if storedHash.Valid && storedHash.String != "" && storedHash.String == hash {
+		return true, nil
+	}
+	same := title == write.Title &&
+		author == write.Author &&
+		published == write.PublishedAt &&
+		day == write.PublishedDay &&
+		mode == write.OpenMode &&
+		action == write.ActionURL &&
+		plain == write.PlainText &&
+		nullEq(discussion, write.DiscussionURL) &&
+		nullEq(markdown, write.ContentMarkdown) &&
+		nullEq(excerpt, write.Excerpt) &&
+		strings.TrimSpace(meta.String) == strings.TrimSpace(string(write.Metadata))
+	return same, nil
+}
+
+func contentHash(item ItemWrite) string {
+	h := sha256.New()
+	write := func(s string) {
+		_, _ = h.Write([]byte(s))
+		_, _ = h.Write([]byte{0})
+	}
+	write(item.Title)
+	write(item.Author)
+	write(item.PublishedAt)
+	write(item.PublishedDay)
+	write(item.OpenMode)
+	write(item.ActionURL)
+	write(strings.TrimSpace(item.ContentMarkdown))
+	write(item.PlainText)
+	write(strings.TrimSpace(item.Excerpt))
+	write(strings.TrimSpace(item.DiscussionURL))
+	write(strings.TrimSpace(string(item.Metadata)))
+	return hex.EncodeToString(h.Sum(nil))
+}
+
+func nullEq(stored sql.NullString, value string) bool {
+	value = strings.TrimSpace(value)
+	got := ""
+	if stored.Valid {
+		got = strings.TrimSpace(stored.String)
+	}
+	return got == value
 }
 
 func (s *Store) PutState(id string, state model.UserItemState) error {
@@ -686,16 +875,26 @@ ORDER BY st.saved_at DESC, i.id DESC
 	return collectRows(rows)
 }
 
+// Search returns every matching item, read or unread.
+func (s *Store) Search(match string, limit, offset int) ([]model.ItemRow, error) {
+	limit, offset = clampPage(limit, offset)
+	query := rowSelect + ` WHERE 1 = 1`
+	var args []any
+	if match != "" {
+		query += ` AND i.id IN (SELECT item_id FROM items_fts WHERE items_fts MATCH ?)`
+		args = append(args, match)
+	}
+	query += ` ORDER BY i.published_at DESC, i.id DESC LIMIT ? OFFSET ?`
+	args = append(args, limit, offset)
+	rows, err := s.SQL.Query(query, args...)
+	if err != nil {
+		return nil, err
+	}
+	return collectRows(rows)
+}
+
 func (s *Store) Read(match string, limit, offset int) ([]model.ItemRow, error) {
-	if limit <= 0 {
-		limit = 50
-	}
-	if limit > 200 {
-		limit = 200
-	}
-	if offset < 0 {
-		offset = 0
-	}
+	limit, offset = clampPage(limit, offset)
 	query := rowSelect + ` WHERE st.read_at IS NOT NULL`
 	var args []any
 	if match != "" {
@@ -709,6 +908,38 @@ func (s *Store) Read(match string, limit, offset int) ([]model.ItemRow, error) {
 		return nil, err
 	}
 	return collectRows(rows)
+}
+
+func clampPage(limit, offset int) (int, int) {
+	if limit <= 0 {
+		limit = 50
+	}
+	if limit > 200 {
+		limit = 200
+	}
+	if offset < 0 {
+		offset = 0
+	}
+	return limit, offset
+}
+
+func (s *Store) NewestLastFetched() (*time.Time, error) {
+	var raw sql.NullString
+	err := s.SQL.QueryRow(`
+SELECT MAX(last_fetched_at) FROM sources
+WHERE last_fetched_at IS NOT NULL AND last_fetched_at != ''
+`).Scan(&raw)
+	if err != nil || !raw.Valid || strings.TrimSpace(raw.String) == "" {
+		return nil, err
+	}
+	parsed, err := time.Parse(time.RFC3339Nano, raw.String)
+	if err != nil {
+		parsed, err = time.Parse(time.RFC3339, raw.String)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return &parsed, nil
 }
 
 func filterSQL(folder, sourceID string) (string, []any) {
@@ -751,11 +982,11 @@ type scanner interface {
 
 func scanSource(sc scanner) (model.Source, error) {
 	var src model.Source
-	var feed, alias, config, fetched, etag, modified sql.NullString
+	var feed, alias, config, fetched, etag, modified, lastError, lastStatus sql.NullString
 	var enabled int
 	err := sc.Scan(
 		&src.ID, &src.Name, &src.SourceType, &src.Folder, &src.DefaultOpenMode, &src.DefaultQueue,
-		&feed, &alias, &config, &enabled, &fetched, &etag, &modified, &src.CreatedAt, &src.UpdatedAt,
+		&feed, &alias, &config, &enabled, &fetched, &etag, &modified, &lastError, &lastStatus, &src.CreatedAt, &src.UpdatedAt,
 	)
 	if err != nil {
 		return model.Source{}, err
@@ -766,6 +997,8 @@ func scanSource(sc scanner) (model.Source, error) {
 	src.LastFetchedAt = StringPtr(fetched)
 	src.ETag = StringOf(etag)
 	src.LastModified = StringOf(modified)
+	src.LastError = StringOf(lastError)
+	src.LastStatus = StringOf(lastStatus)
 	src.Config = map[string]any{}
 	if config.Valid && config.String != "" {
 		_ = json.Unmarshal([]byte(config.String), &src.Config)
@@ -777,7 +1010,7 @@ func scanRow(sc scanner) (model.Item, model.Source, model.UserItemState, int, er
 	var item model.Item
 	var discussion, markdown, excerpt, meta sql.NullString
 	var source model.Source
-	var feed, alias, config, fetched, etag, modified sql.NullString
+	var feed, alias, config, fetched, etag, modified, lastError, lastStatus sql.NullString
 	var enabled, inLater int
 	var saved, read sql.NullString
 	var progress float64
@@ -787,7 +1020,7 @@ func scanRow(sc scanner) (model.Item, model.Source, model.UserItemState, int, er
 		&item.Title, &item.Author, &item.PublishedAt, &item.PublishedDay, &item.OpenMode, &item.ActionURL,
 		&markdown, &item.PlainText, &excerpt, &meta, &item.CreatedAt, &item.UpdatedAt,
 		&source.ID, &source.Name, &source.SourceType, &source.Folder, &source.DefaultOpenMode, &source.DefaultQueue,
-		&feed, &alias, &config, &enabled, &fetched, &etag, &modified, &source.CreatedAt, &source.UpdatedAt,
+		&feed, &alias, &config, &enabled, &fetched, &etag, &modified, &lastError, &lastStatus, &source.CreatedAt, &source.UpdatedAt,
 		&inLater, &saved, &read, &progress, &count,
 	)
 	if err != nil {
@@ -808,6 +1041,8 @@ func scanRow(sc scanner) (model.Item, model.Source, model.UserItemState, int, er
 	source.LastFetchedAt = StringPtr(fetched)
 	source.ETag = StringOf(etag)
 	source.LastModified = StringOf(modified)
+	source.LastError = StringOf(lastError)
+	source.LastStatus = StringOf(lastStatus)
 	source.Config = map[string]any{}
 	if config.Valid && config.String != "" {
 		_ = json.Unmarshal([]byte(config.String), &source.Config)
@@ -877,9 +1112,10 @@ UPDATE user_item_state SET in_later = ?, saved_at = ?, read_at = ?, updated_at =
 }
 
 func reindexTx(tx *sql.Tx, itemID string) error {
+	var rowid int64
 	var title, author, plain, meta string
-	if err := tx.QueryRow(`SELECT title, author, plain_text, metadata_json FROM items WHERE id = ?`, itemID).
-		Scan(&title, &author, &plain, &meta); err != nil {
+	if err := tx.QueryRow(`SELECT rowid, title, author, plain_text, metadata_json FROM items WHERE id = ?`, itemID).
+		Scan(&rowid, &title, &author, &plain, &meta); err != nil {
 		return err
 	}
 	rows, err := tx.Query(`SELECT quote, note FROM highlights WHERE item_id = ?`, itemID)
@@ -899,13 +1135,15 @@ func reindexTx(tx *sql.Tx, itemID string) error {
 	if err := rows.Err(); err != nil {
 		return err
 	}
-	if _, err := tx.Exec(`DELETE FROM items_fts WHERE item_id = ?`, itemID); err != nil {
+	// item_id is an UNINDEXED FTS column, so deleting by it scans the whole table.
+	// The FTS rowid is items.rowid, which is a direct lookup.
+	if _, err := tx.Exec(`DELETE FROM items_fts WHERE rowid = ?`, rowid); err != nil {
 		return err
 	}
 	_, err = tx.Exec(`
-INSERT INTO items_fts (item_id, title, author, plain_text, metadata_text, highlights_text)
-VALUES (?, ?, ?, ?, ?, ?)
-`, itemID, title, author, plain, metadataText(json.RawMessage(meta)), strings.Join(notes, "\n"))
+INSERT INTO items_fts (rowid, item_id, title, author, plain_text, metadata_text, highlights_text)
+VALUES (?, ?, ?, ?, ?, ?, ?)
+`, rowid, itemID, title, author, plain, metadataText(json.RawMessage(meta)), strings.Join(notes, "\n"))
 	return err
 }
 

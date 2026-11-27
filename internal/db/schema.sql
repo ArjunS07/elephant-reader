@@ -12,6 +12,8 @@ CREATE TABLE IF NOT EXISTS sources (
   last_fetched_at TEXT,
   etag TEXT,
   last_modified TEXT,
+  last_error TEXT,
+  last_status TEXT,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );
@@ -36,12 +38,16 @@ CREATE TABLE IF NOT EXISTS items (
   plain_text TEXT NOT NULL DEFAULT '',
   excerpt TEXT,
   metadata_json TEXT NOT NULL DEFAULT '{}',
+  content_hash TEXT,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
   UNIQUE (source_id, external_id)
 );
 
-CREATE UNIQUE INDEX IF NOT EXISTS items_canonical_url ON items(canonical_url);
+-- canonical_url is NOT globally unique: episodes often share a show URL, and
+-- the same link can appear in more than one source (HN and a digest).
+-- Identity is (source_id, external_id). This index only speeds same-source URL lookups.
+CREATE INDEX IF NOT EXISTS items_source_canonical ON items(source_id, canonical_url);
 CREATE INDEX IF NOT EXISTS items_published_day ON items(published_day);
 CREATE INDEX IF NOT EXISTS items_source_id ON items(source_id);
 
@@ -85,6 +91,11 @@ INSERT OR IGNORE INTO user_preferences (
   id, theme, font_family, font_size, line_height, column_width, align, updated_at
 ) VALUES (
   1, 'warm', 'inter', 18, 1.65, 'standard', 'left', '1970-01-01T00:00:00Z'
+);
+
+CREATE TABLE IF NOT EXISTS schema_migrations (
+  id TEXT PRIMARY KEY,
+  applied_at TEXT NOT NULL
 );
 
 CREATE VIRTUAL TABLE IF NOT EXISTS items_fts USING fts5(

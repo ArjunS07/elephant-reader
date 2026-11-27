@@ -89,11 +89,14 @@ func serve(store *db.Store) error {
 	if port[0] != ':' {
 		port = ":" + port
 	}
+	svc := ingest.New(store)
 	handler := api.WithStatic(api.NewOptions(store, api.Options{
 		Token:      os.Getenv("ELEPHANT_API_TOKEN"),
 		Passphrase: os.Getenv("ELEPHANT_PASSPHRASE"),
 		CORSOrigin: os.Getenv("ELEPHANT_CORS_ORIGIN"),
+		Service:    svc,
 	}), env("STATIC_DIR", "dist"))
+	svc.CatchUp()
 	return listen(newHTTPServer(port, handler))
 }
 

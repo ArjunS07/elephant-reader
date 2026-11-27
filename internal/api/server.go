@@ -33,6 +33,10 @@ type Options struct {
 	Passphrase string
 	CORSOrigin string
 	HTTPClient *http.Client
+	// Service is the feed syncer the handler and startup catch-up share.
+	// Nil creates one. HTTPClient, when set, replaces that service's client
+	// so tests can fetch loopback URLs the SSRF dialer refuses.
+	Service *ingest.Service
 }
 
 func New(store *db.Store, token string) http.Handler {
@@ -40,7 +44,10 @@ func New(store *db.Store, token string) http.Handler {
 }
 
 func NewOptions(store *db.Store, opt Options) http.Handler {
-	svc := ingest.New(store)
+	svc := opt.Service
+	if svc == nil {
+		svc = ingest.New(store)
+	}
 	if opt.HTTPClient != nil {
 		svc.HTTP = opt.HTTPClient
 	}
@@ -76,6 +83,7 @@ func NewOptions(store *db.Store, opt Options) http.Handler {
 	mux.HandleFunc("PATCH /v1/sources/{id}", s.patchSource)
 	mux.HandleFunc("DELETE /v1/sources/{id}", s.deleteSource)
 	mux.HandleFunc("POST /v1/sources/{id}/sync", s.syncOne)
+	mux.HandleFunc("GET /v1/sync/status", s.syncStatus)
 	mux.HandleFunc("POST /v1/sync", s.syncAll)
 	mux.HandleFunc("POST /v1/inbound/email", s.inbound)
 	mux.HandleFunc("GET /v1/preferences", s.getPrefs)
@@ -187,7 +195,13 @@ func (s *Server) read(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	items, err := s.Store.Read(match, limit, offset)
+	var items []model.ItemRow
+	var err error
+	if match != "" {
+		items, err = s.Store.Search(match, limit, offset)
+	} else {
+		items, err = s.Store.Read("", limit, offset)
+	}
 	if err != nil {
 		writeStoreError(w, err)
 		return
@@ -508,13 +522,13 @@ func (s *Server) syncOne(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, result)
 }
 
-func (s *Server) syncAll(w http.ResponseWriter, r *http.Request) {
-	result, err := s.Ingest.Sync(r.Context(), "")
-	if err != nil {
-		writeStoreError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, result)
+func (s *Server) syncAll(w http.ResponseWriter, _ *http.Request) {
+	// Detach from the request so closing the tab does not abort the job.
+	writeJSON(w, http.StatusAccepted, s.Ingest.StartSync())
+}
+
+func (s *Server) syncStatus(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, http.StatusOK, s.Ingest.Status())
 }
 
 func (s *Server) inbound(w http.ResponseWriter, r *http.Request) {
