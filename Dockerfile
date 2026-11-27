@@ -5,6 +5,8 @@ RUN npm ci
 COPY index.html vite.config.ts tsconfig.json tsconfig.app.json tsconfig.node.json ./
 COPY public ./public
 COPY src ./src
+ARG VITE_ELEPHANT_API_TOKEN
+ENV VITE_ELEPHANT_API_TOKEN=$VITE_ELEPHANT_API_TOKEN
 RUN npm run build
 
 FROM golang:1.23-alpine AS build
