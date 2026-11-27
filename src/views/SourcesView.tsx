@@ -1,12 +1,10 @@
 import { useRef, useState, type FormEvent } from 'react'
 import { Link } from 'react-router-dom'
 import { createSource, deleteSource, importSources, syncAll, syncSource } from '../api.ts'
-import { hostname } from '../lib/format.ts'
+import { hostname, relativeTime } from '../lib/format.ts'
+import { sourceInFolder, sourceTabNames } from '../lib/folders.ts'
 import { useActions, useLibrary } from '../lib/hooks.ts'
 import type { Source } from '../types.ts'
-
-const TABS = ['All', 'Papers', 'RSS', 'Newsletters', 'HN', 'Podcasts', 'Video', 'Briefings'] as const
-type Tab = (typeof TABS)[number]
 
 const ADD = [
   { id: 'Papers', sourceType: 'papers', folder: 'Papers', openMode: 'reader' },
@@ -18,21 +16,31 @@ const ADD = [
   { id: 'Briefings', sourceType: 'snapshot', folder: 'Briefings', openMode: 'external' },
 ] as const
 
-function inTab(source: Source, tab: Tab): boolean {
-  if (tab === 'All') return true
-  if (tab === 'Papers') return source.sourceType === 'papers' || source.folder === 'Papers'
-  if (tab === 'RSS') return source.sourceType === 'rss'
-  if (tab === 'Newsletters') return source.sourceType === 'newsletter' || source.folder === 'Newsletters'
-  if (tab === 'HN') return source.sourceType === 'hn' || source.folder === 'HN'
-  if (tab === 'Podcasts') return source.sourceType === 'podcast' || source.folder === 'Podcasts'
-  if (tab === 'Video') return source.sourceType === 'youtube' || source.folder === 'Video'
-  return source.folder === 'Briefings'
-}
-
 function cue(source: Source): string {
   if (source.emailAlias) return source.emailAlias
   if (!source.feedUrl) return ''
   return hostname(source.feedUrl)
+}
+
+function youtubeHost(host: string): boolean {
+  return host === 'youtube.com' || host === 'youtu.be' || host.endsWith('.youtube.com') || host.endsWith('.youtube-nocookie.com')
+}
+
+function rowDetail(source: Source): { text: string; failed: boolean } | null {
+  const error = source.lastError?.trim() ?? ''
+  const when = relativeTime(source.lastFetchedAt)
+  let quiet = ''
+  if (source.emailAlias) quiet = source.emailAlias
+  else if (source.sourceType !== 'youtube' && source.feedUrl) {
+    const host = hostname(source.feedUrl)
+    if (host && !youtubeHost(host)) quiet = host
+  }
+  const parts: string[] = []
+  if (error) parts.push(error)
+  else if (quiet) parts.push(quiet)
+  if (when) parts.push(when)
+  if (!parts.length) return null
+  return { text: parts.join(' · '), failed: Boolean(error) }
 }
 
 function matchesQuery(source: Source, query: string): boolean {
@@ -59,7 +67,8 @@ export function SourcesView() {
   const { sources, ready } = useLibrary()
   const { toggleSource, reloadSources } = useActions()
   const fileRef = useRef<HTMLInputElement>(null)
-  const [tab, setTab] = useState<Tab>('All')
+  const [tab, setTab] = useState('All')
+  const [pendingDelete, setPendingDelete] = useState<string | null>(null)
   const [query, setQuery] = useState('')
   const [adding, setAdding] = useState(false)
   const [name, setName] = useState('')
@@ -70,10 +79,10 @@ export function SourcesView() {
   const [busy, setBusy] = useState<string | null>(null)
 
   const needle = query.trim().toLowerCase()
-  const counts = Object.fromEntries(TABS.map((name) => [name, sources.filter((source) => inTab(source, name)).length])) as Record<Tab, number>
-  const visibleTabs = TABS.filter((name) => name === 'All' || counts[name] > 0)
+  const visibleTabs = sourceTabNames(sources)
+  const counts = Object.fromEntries(visibleTabs.map((name) => [name, sources.filter((source) => sourceInFolder(source, name)).length])) as Record<string, number>
   const active = visibleTabs.includes(tab) ? tab : 'All'
-  const rows = sources.filter((source) => inTab(source, active) && matchesQuery(source, needle))
+  const rows = sources.filter((source) => sourceInFolder(source, active) && matchesQuery(source, needle))
 
   const save = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
@@ -133,13 +142,16 @@ export function SourcesView() {
   }
 
   const remove = async (source: Source) => {
-    if (!window.confirm(`Delete ${source.name}?`)) return
+    setBusy(source.id)
+    setError(null)
     try {
       await deleteSource(source.id)
-      setError(null)
+      setPendingDelete((current) => (current === source.id ? null : current))
       await reloadSources()
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'Could not delete')
+    } finally {
+      setBusy(null)
     }
   }
 
@@ -218,30 +230,49 @@ export function SourcesView() {
       {notice ? <p className="meta">{notice}</p> : null}
       <div className="source-list">
         {rows.map((source) => {
-          const detail = cue(source)
+          const detail = rowDetail(source)
+          const confirming = pendingDelete === source.id
           return (
             <div key={source.id} className="source" data-paused={source.enabled ? 'false' : 'true'}>
               <div className="source-copy">
                 <Link className="source-name" to={`/feed?source=${source.id}`}>
                   {source.name}
                 </Link>
-                {detail ? <span className="source-domain">{detail}</span> : null}
+                {detail ? (
+                  <span className="source-domain" data-failed={detail.failed ? 'true' : undefined}>
+                    {detail.text}
+                  </span>
+                ) : null}
               </div>
               <div className="source-actions">
-                <button
-                  type="button"
-                  className="text-btn"
-                  aria-pressed={source.enabled}
-                  onClick={() => void toggleSource(source.id)}
-                >
-                  {source.enabled ? 'Enabled' : 'Paused'}
-                </button>
-                <button type="button" className="text-btn" disabled={busy === source.id} onClick={() => void runSync(source.id)}>
-                  Sync
-                </button>
-                <button type="button" className="text-btn" onClick={() => void remove(source)}>
-                  Delete
-                </button>
+                {confirming ? (
+                  <>
+                    <span className="source-prompt">Delete?</span>
+                    <button type="button" className="text-btn" disabled={busy === source.id} onClick={() => void remove(source)}>
+                      Confirm
+                    </button>
+                    <button type="button" className="text-btn" disabled={busy === source.id} onClick={() => setPendingDelete(null)}>
+                      Cancel
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <button
+                      type="button"
+                      className="text-btn"
+                      aria-pressed={source.enabled}
+                      onClick={() => void toggleSource(source.id)}
+                    >
+                      {source.enabled ? 'Enabled' : 'Paused'}
+                    </button>
+                    <button type="button" className="text-btn" disabled={busy === source.id} onClick={() => void runSync(source.id)}>
+                      Sync
+                    </button>
+                    <button type="button" className="text-btn" onClick={() => setPendingDelete(source.id)}>
+                      Delete
+                    </button>
+                  </>
+                )}
               </div>
             </div>
           )

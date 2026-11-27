@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
-import { formatDayHeading, monthLabel, shiftDay } from '../lib/format.ts'
+import { formatDayHeading, monthLabel } from '../lib/format.ts'
 
 const WEEK = ['S', 'M', 'T', 'W', 'T', 'F', 'S']
 
@@ -23,14 +23,14 @@ function cellsFor(year: number, month: number): Array<number | null> {
 
 export function DayNav({
   day,
-  earliest,
-  latest,
+  prevDay,
+  nextDay,
   counts,
   onDay,
 }: {
   day: string
-  earliest: string
-  latest: string
+  prevDay?: string | null
+  nextDay?: string | null
   counts: Record<string, number>
   onDay: (day: string) => void
 }) {
@@ -41,8 +41,8 @@ export function DayNav({
   const root = useRef<HTMLDivElement>(null)
   const trigger = useRef<HTMLButtonElement>(null)
   const popover = useRef<HTMLDivElement>(null)
-  const prev = day > earliest ? shiftDay(day, -1) : null
-  const next = day < latest ? shiftDay(day, 1) : null
+  const prev = prevDay?.trim() ? prevDay : null
+  const next = nextDay?.trim() ? nextDay : null
 
   useEffect(() => {
     setCursor({ year, month })

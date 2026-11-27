@@ -24,6 +24,7 @@ export interface Source {
   config?: Record<string, unknown>
   enabled: boolean
   lastFetchedAt?: string | null
+  lastError?: string | null
   createdAt?: string
   updatedAt?: string
 }
@@ -53,13 +54,13 @@ export interface DiscussionQuote {
 
 export interface PaperMetadata {
   kind: 'paper'
-  authors: string[]
-  affiliations: string[]
+  authors?: string[]
+  affiliations?: string[]
   arxivId?: string
   venue?: string
   tractionNote?: string
-  abstract: string
-  links: PaperLink[]
+  abstract?: string
+  links?: PaperLink[]
   discussionQuotes?: DiscussionQuote[]
 }
 
