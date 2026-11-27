@@ -16,15 +16,50 @@ import (
 )
 
 type Server struct {
-	Store  *db.Store
-	Ingest *ingest.Service
-	Token  string
+	Store      *db.Store
+	Ingest     *ingest.Service
+	Token      string
+	Passphrase string
+	CORSOrigin string
+	macKey     []byte
+	limiter    *rateLimiter
+}
+
+// Options configures API authentication and the feed client.
+// HTTPClient replaces the SSRF-safe feed client. Tests set it so they can
+// fetch from httptest.NewServer, which listens on loopback.
+type Options struct {
+	Token      string
+	Passphrase string
+	CORSOrigin string
+	HTTPClient *http.Client
 }
 
 func New(store *db.Store, token string) http.Handler {
-	s := &Server{Store: store, Ingest: ingest.New(store), Token: token}
+	return NewOptions(store, Options{Token: token})
+}
+
+func NewOptions(store *db.Store, opt Options) http.Handler {
+	svc := ingest.New(store)
+	if opt.HTTPClient != nil {
+		svc.HTTP = opt.HTTPClient
+	}
+	s := &Server{
+		Store:      store,
+		Ingest:     svc,
+		Token:      opt.Token,
+		Passphrase: opt.Passphrase,
+		CORSOrigin: strings.TrimSpace(opt.CORSOrigin),
+		limiter:    newRateLimiter(sessionAttemptLimit, sessionAttemptWindow),
+	}
+	if secret := s.loginSecret(); secret != "" {
+		s.macKey = sessionMACKey(secret)
+	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /v1/health", s.health)
+	mux.HandleFunc("GET /v1/session", s.getSession)
+	mux.HandleFunc("POST /v1/session", s.postSession)
+	mux.HandleFunc("DELETE /v1/session", s.deleteSession)
 	mux.HandleFunc("POST /v1/ingest", s.ingest)
 	mux.HandleFunc("GET /v1/feed", s.feed)
 	mux.HandleFunc("GET /v1/calendar", s.calendar)
@@ -46,25 +81,6 @@ func New(store *db.Store, token string) http.Handler {
 	mux.HandleFunc("GET /v1/preferences", s.getPrefs)
 	mux.HandleFunc("PATCH /v1/preferences", s.patchPrefs)
 	return s.auth(mux)
-}
-
-func (s *Server) auth(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type")
-		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PATCH, DELETE, OPTIONS")
-		if r.Method == http.MethodOptions {
-			w.WriteHeader(http.StatusNoContent)
-			return
-		}
-		if s.Token != "" && !(r.Method == http.MethodGet && r.URL.Path == "/v1/health") {
-			if r.Header.Get("Authorization") != "Bearer "+s.Token {
-				writeError(w, http.StatusUnauthorized, "unauthorized")
-				return
-			}
-		}
-		next.ServeHTTP(w, r)
-	})
 }
 
 func (s *Server) health(w http.ResponseWriter, _ *http.Request) {
@@ -601,6 +617,7 @@ func (s *Server) patchPrefs(w http.ResponseWriter, r *http.Request) {
 
 func WithStatic(api http.Handler, dir string) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		setSecurityHeaders(w)
 		if strings.HasPrefix(r.URL.Path, "/v1/") || r.URL.Path == "/v1" {
 			api.ServeHTTP(w, r)
 			return
@@ -616,6 +633,7 @@ func WithStatic(api http.Handler, dir string) http.Handler {
 		target := filepath.Join(dir, clean)
 		info, err := os.Stat(target)
 		if err == nil && !info.IsDir() {
+			setStaticCache(w, r.URL.Path, target)
 			http.ServeFile(w, r, target)
 			return
 		}
@@ -624,8 +642,19 @@ func WithStatic(api http.Handler, dir string) http.Handler {
 			http.NotFound(w, r)
 			return
 		}
+		w.Header().Set("Cache-Control", "no-cache")
 		http.ServeFile(w, r, index)
 	})
+}
+
+func setStaticCache(w http.ResponseWriter, requestPath, target string) {
+	if filepath.Base(target) == "index.html" {
+		w.Header().Set("Cache-Control", "no-cache")
+		return
+	}
+	if strings.HasPrefix(requestPath, "/assets/") {
+		w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+	}
 }
 
 func decodeIngest(body []byte) ([]model.IngestItem, error) {

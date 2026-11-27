@@ -29,7 +29,12 @@ func newServer(t *testing.T, token string) (*httptest.Server, *db.Store) {
 	if err := store.Migrate(); err != nil {
 		t.Fatal(err)
 	}
-	return httptest.NewServer(New(store, token)), store
+	// Feed sync tests fetch httptest servers on loopback. The production
+	// client rejects those addresses, so tests install a plain client.
+	return httptest.NewServer(NewOptions(store, Options{
+		Token:      token,
+		HTTPClient: &http.Client{Timeout: 15 * time.Second},
+	})), store
 }
 
 func do(t *testing.T, server *httptest.Server, method, path, token string, body any) *http.Response {

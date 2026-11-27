@@ -34,15 +34,16 @@ YouTube Takeout CSV rows become Video sources. Overcast OPML rows become podcast
 
 ## Deploy on Fly.io
 
-The app is one shared-cpu-1x Machine with 256 MB of RAM in `lax`, a 1 GB volume at `/data`, and machines that stop when idle (`min_machines_running = 0`). That stays inside the $5/mo Free allowance. Change `app` in `fly.toml` if the name `elephant` is already taken. Deploy with a single Machine so the SQLite file on `elephant_data` is not split across hosts:
+The app is one shared-cpu-1x Machine with 256 MB of RAM and 256 MB of swap in `lax`, a 1 GB volume at `/data`, and machines that stop when idle (`min_machines_running = 0`). `GOMEMLIMIT` is `180MiB` and `kill_timeout` is 15s so a deploy can drain in-flight requests. That stays inside the $5/mo Free allowance. The Fly app name is `elephant-reader-arjun`. Deploy with a single Machine so the SQLite file on `elephant_data` is not split across hosts:
 
 ```bash
 fly launch --no-deploy
 fly secrets set ELEPHANT_API_TOKEN=...
+fly secrets set ELEPHANT_PASSPHRASE=...
 fly deploy --ha=false
 ```
 
-`GET /v1/health` is the HTTP check and stays open when the token is set. Everything else under `/v1` requires the bearer token.
+`GET /v1/health` is the HTTP check and stays open. The browser unlocks with `POST /v1/session` and then sends the `HttpOnly` session cookie. CLI and server-to-server calls keep using `Authorization: Bearer <ELEPHANT_API_TOKEN>`. The token is not baked into the frontend bundle.
 
 There is no second worker. Seed and feed sync run on the same Machine, against the volume:
 
@@ -65,10 +66,11 @@ npm run build
 | --- | --- | --- |
 | `PORT` | `8080` | HTTP port |
 | `DATABASE_PATH` | `data/elephant.db` | SQLite file |
-| `ELEPHANT_API_TOKEN` | unset | If set, `/v1/*` requires `Authorization: Bearer <token>` except `GET /v1/health` |
+| `ELEPHANT_API_TOKEN` | unset | Bearer token for CLI and server-to-server calls. Also the browser passphrase when `ELEPHANT_PASSPHRASE` is unset |
+| `ELEPHANT_PASSPHRASE` | unset | Browser passphrase checked by `POST /v1/session`. Falls back to `ELEPHANT_API_TOKEN` |
+| `ELEPHANT_CORS_ORIGIN` | unset | Optional allowed browser origin. Same-origin requests need nothing, and `*` is ignored |
 | `ELEPHANT_TIMEZONE` | `America/Los_Angeles` | Timezone for `published_day` |
 | `STATIC_DIR` | `dist` | Built frontend. Missing directory still serves the API |
-| `VITE_ELEPHANT_API_TOKEN` | unset | Sent by the dev UI when the API token is set |
 
 ## Layout
 
