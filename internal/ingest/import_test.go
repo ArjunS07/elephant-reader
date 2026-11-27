@@ -2,6 +2,7 @@ package ingest
 
 import (
 	"context"
+	"encoding/json"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -62,15 +63,26 @@ func TestOPMLAndOvercastAction(t *testing.T) {
 		t.Fatalf("%+v", source)
 	}
 	items := EntriesToItems(source, []FeedEntry{{Title: "Episode", Link: "https://www.latent.space/p/ep", ID: "ep"}})
-	if items[0].ActionURL != "https://overcast.fm/itunes4242" || items[0].OpenMode != "deeplink" {
+	if items[0].ActionURL != "https://www.latent.space/p/ep" || items[0].OpenMode != "reader" {
 		t.Fatalf("%+v", items[0])
+	}
+	var meta map[string]any
+	if err := json.Unmarshal(items[0].Metadata, &meta); err != nil || meta["overcastUrl"] != "https://overcast.fm/itunes4242" {
+		t.Fatalf("meta %+v %v", meta, err)
 	}
 
 	fallback := source
 	fallback.Config = map[string]any{"overcastId": "1844"}
 	items = EntriesToItems(fallback, []FeedEntry{{Title: "Episode", Link: "https://www.latent.space/p/ep", ID: "ep"}})
-	if !strings.HasPrefix(items[0].ActionURL, "overcast://x-callback-url/add?url=") || !strings.Contains(items[0].ActionURL, "latent.space") {
-		t.Fatalf("fallback %s", items[0].ActionURL)
+	if items[0].ActionURL != "https://www.latent.space/p/ep" {
+		t.Fatalf("action %s", items[0].ActionURL)
+	}
+	if err := json.Unmarshal(items[0].Metadata, &meta); err != nil {
+		t.Fatal(err)
+	}
+	showURL, _ := meta["overcastUrl"].(string)
+	if !strings.HasPrefix(showURL, "overcast://x-callback-url/add?url=") || !strings.Contains(showURL, "latent.space") {
+		t.Fatalf("fallback %s", showURL)
 	}
 }
 

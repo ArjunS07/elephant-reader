@@ -132,8 +132,18 @@ func TestMigrationsIngestAndState(t *testing.T) {
 		"publishedAt":  "2026-11-26T18:00:00Z",
 	})
 	decode(t, res, &ingested)
-	if ingested.Items[0].ID != item.ID {
-		t.Fatal("canonical url was not deduped")
+	if ingested.Items[0].ID == item.ID || ingested.Items[0].SourceID != "src_pod" {
+		t.Fatalf("canonical url collapsed across sources: %+v", ingested.Items[0])
+	}
+	res = do(t, server, http.MethodPost, "/v1/ingest", "", map[string]any{
+		"sourceId": "src_papers", "externalId": "2511.18421-b",
+		"canonicalUrl": "https://arxiv.org/abs/2511.18421",
+		"title":        "Digest copy",
+		"publishedAt":  "2026-11-26T19:00:00Z",
+	})
+	decode(t, res, &ingested)
+	if res.StatusCode != http.StatusOK || ingested.Items[0].ID == item.ID || ingested.Items[0].SourceID != "src_papers" {
+		t.Fatalf("same-source external id collapsed: status %d %+v", res.StatusCode, ingested.Items[0])
 	}
 
 	res = do(t, server, http.MethodPost, "/v1/ingest", "", map[string]any{
@@ -248,6 +258,14 @@ func TestFeedCalendarAndSearch(t *testing.T) {
 	}
 
 	paper := ingested.Items[0]
+	res = do(t, server, http.MethodGet, "/v1/read?q=friction", auth, nil)
+	var unread struct {
+		Items []model.ItemRow `json:"items"`
+	}
+	decode(t, res, &unread)
+	if len(unread.Items) != 1 || unread.Items[0].Item.ID != paper.ID || unread.Items[0].State.ReadAt != nil {
+		t.Fatalf("unread search %+v", unread.Items)
+	}
 	res = do(t, server, http.MethodPatch, "/v1/items/"+paper.ID+"/state", auth, map[string]any{"readAt": "2026-11-27T01:00:00Z"})
 	res.Body.Close()
 	res = do(t, server, http.MethodPost, "/v1/items/"+paper.ID+"/highlights", auth, map[string]any{
@@ -386,7 +404,7 @@ func TestSyncRSS(t *testing.T) {
 		t.Fatalf("sync %+v status %d", synced, res.StatusCode)
 	}
 	rows, err := store.DayItems("2026-11-24", "RSS", "")
-	if err != nil || len(rows) != 1 || rows[0].Item.Title != "Latency budget" {
+	if err != nil || len(rows) != 1 || rows[0].Item.Title != "Latency budget" || rows[0].Item.Author != "Harbor" {
 		t.Fatalf("synced %+v %v", rows, err)
 	}
 }
@@ -421,7 +439,7 @@ func TestConcurrentSyncNotModified(t *testing.T) {
 		</item></channel></rss>`))
 	}))
 	defer feed.Close()
-	server, _ := newServer(t, "")
+	server, store := newServer(t, "")
 	defer server.Close()
 	for _, id := range []string{"a", "b", "c", "dead"} {
 		path := "/" + id
@@ -434,25 +452,75 @@ func TestConcurrentSyncNotModified(t *testing.T) {
 		res.Body.Close()
 	}
 	res := do(t, server, http.MethodPost, "/v1/sync", "", nil)
-	var first struct {
-		Synced      int `json:"synced"`
-		NotModified int `json:"notModified"`
-		Failed      int `json:"failed"`
-		ItemsAdded  int `json:"itemsAdded"`
+	if res.StatusCode != http.StatusAccepted {
+		t.Fatalf("sync status %d", res.StatusCode)
 	}
-	decode(t, res, &first)
-	if first.Synced != 3 || first.Failed != 1 || first.ItemsAdded != 3 || maxInflight.Load() < 2 {
+	res.Body.Close()
+	first := waitSync(t, server)
+	if first.Running || first.Completed != 3 || first.Failed != 1 || first.Total != 4 || maxInflight.Load() < 2 || maxInflight.Load() > 2 {
 		t.Fatalf("first %+v inflight %d", first, maxInflight.Load())
 	}
 	res = do(t, server, http.MethodPost, "/v1/sync", "", nil)
-	var second struct {
-		Synced      int `json:"synced"`
-		NotModified int `json:"notModified"`
-		Failed      int `json:"failed"`
-		ItemsAdded  int `json:"itemsAdded"`
+	if res.StatusCode != http.StatusAccepted {
+		t.Fatalf("second status %d", res.StatusCode)
 	}
-	decode(t, res, &second)
-	if second.NotModified != 3 || second.Failed != 1 || second.ItemsAdded != 0 {
+	res.Body.Close()
+	second := waitSync(t, server)
+	if second.Running || second.Completed != 3 || second.Failed != 1 || second.Total != 4 {
 		t.Fatalf("second %+v", second)
 	}
+	sources, err := store.ListSources()
+	if err != nil {
+		t.Fatal(err)
+	}
+	notModified, errored := 0, 0
+	for _, source := range sources {
+		switch source.LastStatus {
+		case "not_modified":
+			notModified++
+			if source.LastError != "" {
+				t.Fatalf("cleared error missing on %s: %q", source.Name, source.LastError)
+			}
+		case "error":
+			errored++
+			if source.LastError == "" {
+				t.Fatalf("missing last error on %s", source.Name)
+			}
+		}
+	}
+	if notModified != 3 || errored != 1 {
+		t.Fatalf("statuses %+v", sources)
+	}
+}
+
+func waitSync(t *testing.T, server *httptest.Server) struct {
+	Running    bool     `json:"running"`
+	StartedAt  *string  `json:"startedAt"`
+	FinishedAt *string  `json:"finishedAt"`
+	Total      int      `json:"total"`
+	Completed  int      `json:"completed"`
+	Failed     int      `json:"failed"`
+	Errors     []string `json:"errors"`
+} {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	var status struct {
+		Running    bool     `json:"running"`
+		StartedAt  *string  `json:"startedAt"`
+		FinishedAt *string  `json:"finishedAt"`
+		Total      int      `json:"total"`
+		Completed  int      `json:"completed"`
+		Failed     int      `json:"failed"`
+		Errors     []string `json:"errors"`
+	}
+	for time.Now().Before(deadline) {
+		res := do(t, server, http.MethodGet, "/v1/sync/status", "", nil)
+		decode(t, res, &status)
+		if status.StartedAt != nil && !status.Running {
+			return status
+		}
+		time.Sleep(15 * time.Millisecond)
+	}
+	t.Fatalf("sync did not finish: %+v", status)
+	return status
 }

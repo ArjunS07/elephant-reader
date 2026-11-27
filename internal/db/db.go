@@ -41,7 +41,7 @@ func (s *Store) Close() error {
 }
 
 func (s *Store) Migrate() error {
-	if _, err := s.SQL.Exec(`PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;`); err != nil {
+	if _, err := s.SQL.Exec(`PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON; PRAGMA synchronous=NORMAL;`); err != nil {
 		return err
 	}
 	body, err := schemaFS.ReadFile("schema.sql")
@@ -51,10 +51,73 @@ func (s *Store) Migrate() error {
 	if _, err := s.SQL.Exec(string(body)); err != nil {
 		return fmt.Errorf("migrate: %w", err)
 	}
-	if err := s.addColumn("sources", "etag", "TEXT"); err != nil {
+	for _, col := range []struct {
+		table, column, decl string
+	}{
+		{"sources", "etag", "TEXT"},
+		{"sources", "last_modified", "TEXT"},
+		{"sources", "last_error", "TEXT"},
+		{"sources", "last_status", "TEXT"},
+		{"items", "content_hash", "TEXT"},
+	} {
+		if err := s.addColumn(col.table, col.column, col.decl); err != nil {
+			return err
+		}
+	}
+	// Existing databases created a global UNIQUE index on items.canonical_url.
+	// Drop it on every startup; the statement is a no-op once the index is gone.
+	if _, err := s.SQL.Exec(`DROP INDEX IF EXISTS items_canonical_url`); err != nil {
 		return err
 	}
-	return s.addColumn("sources", "last_modified", "TEXT")
+	if _, err := s.SQL.Exec(`CREATE INDEX IF NOT EXISTS items_source_canonical ON items(source_id, canonical_url)`); err != nil {
+		return err
+	}
+	return s.rebuildFTSOnce()
+}
+
+// rebuildFTSOnce rewrites items_fts so each row's FTS rowid matches items.rowid.
+// Deletes can then target the rowid directly instead of scanning the unindexed item_id column.
+func (s *Store) rebuildFTSOnce() error {
+	const id = "fts_rowid_v1"
+	var n int
+	if err := s.SQL.QueryRow(`SELECT COUNT(*) FROM schema_migrations WHERE id = ?`, id).Scan(&n); err != nil {
+		return err
+	}
+	if n > 0 {
+		return nil
+	}
+	if err := s.withTx(func(tx *sql.Tx) error {
+		if _, err := tx.Exec(`DELETE FROM items_fts`); err != nil {
+			return err
+		}
+		rows, err := tx.Query(`SELECT id FROM items`)
+		if err != nil {
+			return err
+		}
+		var ids []string
+		for rows.Next() {
+			var itemID string
+			if err := rows.Scan(&itemID); err != nil {
+				rows.Close()
+				return err
+			}
+			ids = append(ids, itemID)
+		}
+		rows.Close()
+		if err := rows.Err(); err != nil {
+			return err
+		}
+		for _, itemID := range ids {
+			if err := reindexTx(tx, itemID); err != nil {
+				return err
+			}
+		}
+		_, err = tx.Exec(`INSERT INTO schema_migrations (id, applied_at) VALUES (?, ?)`, id, Now())
+		return err
+	}); err != nil {
+		return fmt.Errorf("rebuild fts: %w", err)
+	}
+	return nil
 }
 
 func (s *Store) addColumn(table, column, decl string) error {

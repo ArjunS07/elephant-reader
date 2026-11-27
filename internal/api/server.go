@@ -22,7 +22,14 @@ type Server struct {
 }
 
 func New(store *db.Store, token string) http.Handler {
-	s := &Server{Store: store, Ingest: ingest.New(store), Token: token}
+	return NewWithIngest(store, token, nil)
+}
+
+func NewWithIngest(store *db.Store, token string, svc *ingest.Service) http.Handler {
+	if svc == nil {
+		svc = ingest.New(store)
+	}
+	s := &Server{Store: store, Ingest: svc, Token: token}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /v1/health", s.health)
 	mux.HandleFunc("POST /v1/ingest", s.ingest)
@@ -41,6 +48,7 @@ func New(store *db.Store, token string) http.Handler {
 	mux.HandleFunc("PATCH /v1/sources/{id}", s.patchSource)
 	mux.HandleFunc("DELETE /v1/sources/{id}", s.deleteSource)
 	mux.HandleFunc("POST /v1/sources/{id}/sync", s.syncOne)
+	mux.HandleFunc("GET /v1/sync/status", s.syncStatus)
 	mux.HandleFunc("POST /v1/sync", s.syncAll)
 	mux.HandleFunc("POST /v1/inbound/email", s.inbound)
 	mux.HandleFunc("GET /v1/preferences", s.getPrefs)
@@ -171,7 +179,13 @@ func (s *Server) read(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	items, err := s.Store.Read(match, limit, offset)
+	var items []model.ItemRow
+	var err error
+	if match != "" {
+		items, err = s.Store.Search(match, limit, offset)
+	} else {
+		items, err = s.Store.Read("", limit, offset)
+	}
 	if err != nil {
 		writeStoreError(w, err)
 		return
@@ -492,13 +506,13 @@ func (s *Server) syncOne(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, result)
 }
 
-func (s *Server) syncAll(w http.ResponseWriter, r *http.Request) {
-	result, err := s.Ingest.Sync(r.Context(), "")
-	if err != nil {
-		writeStoreError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, result)
+func (s *Server) syncAll(w http.ResponseWriter, _ *http.Request) {
+	// Detach from the request so closing the tab does not abort the job.
+	writeJSON(w, http.StatusAccepted, s.Ingest.StartSync())
+}
+
+func (s *Server) syncStatus(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, http.StatusOK, s.Ingest.Status())
 }
 
 func (s *Server) inbound(w http.ResponseWriter, r *http.Request) {

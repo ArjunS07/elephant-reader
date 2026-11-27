@@ -18,6 +18,8 @@ var (
 	mdLinkRE  = regexp.MustCompile(`\[([^\]]+)\]\([^)]*\)`)
 	codeRE    = regexp.MustCompile("(?s)```[\\s\\S]*?```")
 	inlineRE  = regexp.MustCompile("`([^`]+)`")
+	urlRE     = regexp.MustCompile(`https?://\S+`)
+	privacyRE = regexp.MustCompile(`(?i)\bsee\s+\S+\s+for\s+privacy(?:\s+and\s+opt-out)?\s+information\.?`)
 )
 
 func HTMLToText(source string) (markdown string, plain string) {
@@ -99,9 +101,9 @@ func PlainFromMarkdown(source string) string {
 	return strings.Join(strings.Fields(text), " ")
 }
 
-func Excerpt(plain, markdown string, metadata json.RawMessage, provided string) string {
+func Excerpt(plain, markdown string, metadata json.RawMessage, provided, title string) string {
 	if strings.TrimSpace(provided) != "" {
-		return strings.TrimSpace(provided)
+		return finishExcerpt(cleanBoilerplate(provided), title)
 	}
 	text := strings.TrimSpace(plain)
 	if text == "" {
@@ -116,7 +118,7 @@ func Excerpt(plain, markdown string, metadata json.RawMessage, provided string) 
 			text = PlainFromMarkdown(markdown)
 		}
 	}
-	text = strings.Join(strings.Fields(text), " ")
+	text = cleanBoilerplate(text)
 	if text == "" {
 		return ""
 	}
@@ -141,7 +143,77 @@ func Excerpt(plain, markdown string, metadata json.RawMessage, provided string) 
 			break
 		}
 	}
-	return strings.TrimSpace(strings.Join(chosen, " "))
+	return finishExcerpt(strings.TrimSpace(strings.Join(chosen, " ")), title)
+}
+
+func finishExcerpt(text, title string) string {
+	text = strings.TrimSpace(text)
+	if text == "" || sameText(text, title) {
+		return ""
+	}
+	return text
+}
+
+func sameText(a, b string) bool {
+	norm := func(s string) string {
+		s = strings.ToLower(strings.Join(strings.Fields(s), " "))
+		return strings.TrimRight(s, ".!?")
+	}
+	left, right := norm(a), norm(b)
+	return left != "" && left == right
+}
+
+func cleanBoilerplate(text string) string {
+	text = privacyRE.ReplaceAllString(text, " ")
+	lines := strings.Split(text, "\n")
+	end := len(lines)
+	for end > 0 && promoLine(lines[end-1]) {
+		end--
+	}
+	text = strings.Join(lines[:end], "\n")
+	sentences := splitSentences(text)
+	cut := len(sentences)
+	for cut > 0 && promoSentence(sentences[cut-1]) {
+		cut--
+	}
+	return strings.Join(strings.Fields(strings.Join(sentences[:cut], " ")), " ")
+}
+
+func promoLine(line string) bool {
+	line = strings.TrimSpace(line)
+	if line == "" {
+		return true
+	}
+	// A paragraph that ends with a sponsor URL still has prose in front of it.
+	// Leave that line intact so sentence trimming can drop only the trailer.
+	if strings.Contains(line, ". ") {
+		without := strings.TrimSpace(urlRE.ReplaceAllString(line, " "))
+		if len(strings.Fields(without)) > 2 {
+			return false
+		}
+	}
+	return promoSentence(line)
+}
+
+func promoSentence(sentence string) bool {
+	sentence = strings.TrimSpace(sentence)
+	if sentence == "" {
+		return true
+	}
+	lower := strings.ToLower(sentence)
+	if strings.Contains(lower, "utm_") ||
+		strings.Contains(lower, "omnystudio.com/listener") ||
+		strings.Contains(lower, "megaphone.fm/adchoices") ||
+		strings.Contains(lower, "for privacy") {
+		return true
+	}
+	if strings.Contains(lower, "://") {
+		without := strings.Join(strings.Fields(urlRE.ReplaceAllString(sentence, " ")), " ")
+		if len(strings.Fields(without)) <= 6 {
+			return true
+		}
+	}
+	return false
 }
 
 func splitSentences(text string) []string {

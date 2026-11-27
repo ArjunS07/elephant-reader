@@ -88,7 +88,9 @@ func serve(store *db.Store) error {
 	if port[0] != ':' {
 		port = ":" + port
 	}
-	handler := api.WithStatic(api.New(store, os.Getenv("ELEPHANT_API_TOKEN")), env("STATIC_DIR", "dist"))
+	svc := ingest.New(store)
+	handler := api.WithStatic(api.NewWithIngest(store, os.Getenv("ELEPHANT_API_TOKEN"), svc), env("STATIC_DIR", "dist"))
+	svc.CatchUp()
 	server := &http.Server{Addr: port, Handler: handler}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()

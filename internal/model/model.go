@@ -16,6 +16,8 @@ type Source struct {
 	LastFetchedAt   *string        `json:"lastFetchedAt"`
 	ETag            string         `json:"etag,omitempty"`
 	LastModified    string         `json:"lastModified,omitempty"`
+	LastError       string         `json:"lastError,omitempty"`
+	LastStatus      string         `json:"lastStatus,omitempty"`
 	CreatedAt       string         `json:"createdAt"`
 	UpdatedAt       string         `json:"updatedAt"`
 }

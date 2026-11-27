@@ -4,9 +4,11 @@ import (
 	"bytes"
 	"encoding/json"
 	"encoding/xml"
+	"errors"
 	"fmt"
 	"io"
 	"net/url"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -15,17 +17,34 @@ import (
 )
 
 type FeedEntry struct {
-	ID          string
-	Title       string
-	Author      string
-	Link        string
-	Published   time.Time
-	HTML        string
-	DurationMin int
+	ID              string
+	Title           string
+	Author          string
+	Link            string
+	EnclosureURL    string
+	EnclosureType   string
+	EnclosureLength int64
+	Published       time.Time
+	HTML            string
+	DurationMin     int
+}
+
+// FeedLimit caps how many entries a parse keeps.
+// A zero MaxItems with FirstSync false parses the whole document.
+// On a newest-first feed the parser stops reading once the cap is satisfied.
+type FeedLimit struct {
+	MaxItems  int
+	MinItems  int
+	NotBefore time.Time
+	FirstSync bool
 }
 
 func ParseFeed(data []byte) ([]FeedEntry, error) {
-	dec := xml.NewDecoder(bytes.NewReader(data))
+	return ParseFeedReader(bytes.NewReader(data), FeedLimit{})
+}
+
+func ParseFeedReader(r io.Reader, lim FeedLimit) ([]FeedEntry, error) {
+	dec := xml.NewDecoder(r)
 	dec.CharsetReader = func(_ string, input io.Reader) (io.Reader, error) { return input, nil }
 	var stack []string
 	var in bool
@@ -33,12 +52,18 @@ func ParseFeed(data []byte) ([]FeedEntry, error) {
 	var cur FeedEntry
 	var contentRank int
 	var items []FeedEntry
-	for {
+	var more bool
+	ordered := true
+	stop := false
+	for !stop {
 		tok, err := dec.Token()
 		if err == io.EOF {
 			break
 		}
 		if err != nil {
+			if len(items) > 0 && truncatedXML(err) {
+				break
+			}
 			return nil, err
 		}
 		switch el := tok.(type) {
@@ -62,9 +87,22 @@ func ParseFeed(data []byte) ([]FeedEntry, error) {
 						cur.Link = href
 					}
 				}
+				if name == "enclosure" {
+					if cur.EnclosureURL == "" {
+						cur.EnclosureURL = strings.TrimSpace(attr(el, "url"))
+					}
+					if cur.EnclosureType == "" {
+						cur.EnclosureType = strings.TrimSpace(attr(el, "type"))
+					}
+					if cur.EnclosureLength == 0 {
+						if n, convErr := strconv.ParseInt(strings.TrimSpace(attr(el, "length")), 10, 64); convErr == nil {
+							cur.EnclosureLength = n
+						}
+					}
+				}
 				if name == "duration" {
 					if seconds := attr(el, "seconds"); seconds != "" {
-						if n, err := strconv.Atoi(seconds); err == nil {
+						if n, convErr := strconv.Atoi(seconds); convErr == nil {
 							cur.DurationMin = minutes(n)
 						}
 					}
@@ -79,7 +117,15 @@ func ParseFeed(data []byte) ([]FeedEntry, error) {
 				depth--
 				if depth == 0 && (name == "item" || name == "entry") {
 					in = false
-					if strings.TrimSpace(cur.Title) != "" || cur.Link != "" {
+					if keepEntry(cur) {
+						if ordered && len(items) > 0 && !publishedDescending(items[len(items)-1], cur) {
+							ordered = false
+						}
+						if ordered && stopBefore(lim, len(items), cur) {
+							more = true
+							stop = true
+							break
+						}
 						items = append(items, cur)
 					}
 				}
@@ -98,7 +144,7 @@ func ParseFeed(data []byte) ([]FeedEntry, error) {
 				if cur.Title == "" && !contains(stack, "media") {
 					cur.Title = text
 				}
-			case "creator":
+			case "creator", "author":
 				if cur.Author == "" {
 					cur.Author = text
 				}
@@ -108,14 +154,14 @@ func ParseFeed(data []byte) ([]FeedEntry, error) {
 				}
 			case "pubdate", "published", "updated", "date":
 				if cur.Published.IsZero() {
-					if parsed, err := ParseTime(text); err == nil {
+					if parsed, timeErr := ParseTime(text); timeErr == nil {
 						cur.Published = parsed
 					}
 				}
 			case "guid", "id":
 				if cur.ID == "" && !contains(stack, "author") {
 					cur.ID = text
-					if cur.Link == "" && strings.Contains(text, "://") {
+					if cur.Link == "" && isHTTPURL(text) {
 						cur.Link = text
 					}
 				}
@@ -130,16 +176,116 @@ func ParseFeed(data []byte) ([]FeedEntry, error) {
 					cur.DurationMin = parseDuration(text)
 				}
 			case "link":
-				if cur.Link == "" && strings.Contains(text, "://") {
+				if cur.Link == "" && isHTTPURL(text) {
 					cur.Link = text
 				}
 			}
 		}
 	}
+	return finalizeEntries(items, lim, more), nil
+}
+
+func keepEntry(cur FeedEntry) bool {
+	return strings.TrimSpace(cur.Title) != "" || strings.TrimSpace(cur.Link) != "" || strings.TrimSpace(cur.EnclosureURL) != ""
+}
+
+func publishedDescending(prev, next FeedEntry) bool {
+	if prev.Published.IsZero() || next.Published.IsZero() {
+		return true
+	}
+	return !next.Published.After(prev.Published)
+}
+
+func stopBefore(lim FeedLimit, have int, next FeedEntry) bool {
+	if lim.MaxItems <= 0 && !lim.FirstSync {
+		return false
+	}
+	if !lim.FirstSync {
+		return lim.MaxItems > 0 && have >= lim.MaxItems
+	}
+	if lim.MaxItems > 0 && have < lim.MaxItems {
+		return false
+	}
+	if lim.NotBefore.IsZero() {
+		return lim.MaxItems > 0 && have >= lim.MaxItems
+	}
+	if next.Published.IsZero() || !next.Published.Before(lim.NotBefore) {
+		return false
+	}
+	return true
+}
+
+func finalizeEntries(items []FeedEntry, lim FeedLimit, large bool) []FeedEntry {
 	if items == nil {
 		items = []FeedEntry{}
 	}
-	return items, nil
+	items = sortNewest(items)
+	if !lim.FirstSync {
+		if lim.MaxItems > 0 && len(items) > lim.MaxItems {
+			return items[:lim.MaxItems]
+		}
+		return items
+	}
+	if lim.MaxItems > 0 && len(items) > lim.MaxItems {
+		large = true
+	}
+	if !large {
+		return items
+	}
+	minItems := lim.MinItems
+	if minItems <= 0 {
+		minItems = 5
+	}
+	var out []FeedEntry
+	for _, entry := range items {
+		if len(out) < minItems {
+			out = append(out, entry)
+			continue
+		}
+		if lim.NotBefore.IsZero() || entry.Published.IsZero() || !entry.Published.Before(lim.NotBefore) {
+			out = append(out, entry)
+			continue
+		}
+		break
+	}
+	if out == nil {
+		out = []FeedEntry{}
+	}
+	return out
+}
+
+func sortNewest(items []FeedEntry) []FeedEntry {
+	out := append([]FeedEntry(nil), items...)
+	sort.SliceStable(out, func(i, j int) bool {
+		return rankTime(out[i].Published).After(rankTime(out[j].Published))
+	})
+	return out
+}
+
+func rankTime(t time.Time) time.Time {
+	if t.IsZero() {
+		return time.Date(9999, 1, 1, 0, 0, 0, 0, time.UTC)
+	}
+	return t
+}
+
+func truncatedXML(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
+		return true
+	}
+	var syn *xml.SyntaxError
+	if errors.As(err, &syn) {
+		return strings.Contains(strings.ToLower(syn.Error()), "eof")
+	}
+	return false
+}
+
+func isHTTPURL(v string) bool {
+	v = strings.ToLower(strings.TrimSpace(v))
+	return strings.HasPrefix(v, "https://") || strings.HasPrefix(v, "http://")
 }
 
 func EntriesToItems(source model.Source, entries []FeedEntry) []model.IngestItem {
@@ -147,11 +293,18 @@ func EntriesToItems(source model.Source, entries []FeedEntry) []model.IngestItem
 	for _, entry := range entries {
 		link := strings.TrimSpace(entry.Link)
 		if link == "" {
+			link = strings.TrimSpace(entry.EnclosureURL)
+		}
+		if link == "" {
 			continue
 		}
 		external := strings.TrimSpace(entry.ID)
 		if external == "" {
-			external = link
+			if enc := strings.TrimSpace(entry.EnclosureURL); enc != "" {
+				external = enc
+			} else {
+				external = link
+			}
 		}
 		markdown, plain := HTMLToText(entry.HTML)
 		if plain == "" {
@@ -161,12 +314,28 @@ func EntriesToItems(source model.Source, entries []FeedEntry) []model.IngestItem
 		if published.IsZero() {
 			published = time.Now().UTC()
 		}
+		author := strings.TrimSpace(entry.Author)
+		if author == "" {
+			author = fallbackAuthor(source, link)
+		}
 		meta := map[string]any{"kind": "generic"}
 		switch source.SourceType {
 		case "podcast":
 			meta = map[string]any{"kind": "podcast", "showName": source.Name, "durationMin": entry.DurationMin}
+			if oc := overcastURL(source); oc != "" {
+				meta["overcastUrl"] = oc
+			}
+			if entry.EnclosureURL != "" {
+				meta["enclosureUrl"] = entry.EnclosureURL
+			}
+			if entry.EnclosureType != "" {
+				meta["enclosureType"] = entry.EnclosureType
+			}
+			if entry.EnclosureLength > 0 {
+				meta["enclosureLength"] = entry.EnclosureLength
+			}
 		case "youtube":
-			channel := entry.Author
+			channel := author
 			if channel == "" {
 				channel = source.Name
 			}
@@ -177,20 +346,18 @@ func EntriesToItems(source model.Source, entries []FeedEntry) []model.IngestItem
 		if !model.ValidOpenMode(mode) {
 			mode = "reader"
 		}
-		action := link
-		if overcast := overcastAction(source); overcast != "" {
-			action = overcast
-			mode = "deeplink"
+		if source.SourceType == "podcast" && mode == "deeplink" {
+			mode = "reader"
 		}
 		out = append(out, model.IngestItem{
 			SourceID:        source.ID,
 			ExternalID:      external,
 			CanonicalURL:    link,
 			Title:           strings.TrimSpace(entry.Title),
-			Author:          strings.TrimSpace(entry.Author),
+			Author:          author,
 			PublishedAt:     published.UTC().Format(time.RFC3339),
 			OpenMode:        mode,
-			ActionURL:       action,
+			ActionURL:       link,
 			ContentMarkdown: markdown,
 			PlainText:       plain,
 			Metadata:        raw,
@@ -199,7 +366,7 @@ func EntriesToItems(source model.Source, entries []FeedEntry) []model.IngestItem
 	return out
 }
 
-func overcastAction(source model.Source) string {
+func overcastURL(source model.Source) string {
 	if source.SourceType != "podcast" || source.Config == nil {
 		return ""
 	}
@@ -210,6 +377,54 @@ func overcastAction(source model.Source) string {
 		return "overcast://x-callback-url/add?url=" + url.QueryEscape(source.FeedURL)
 	}
 	return ""
+}
+
+func fallbackAuthor(source model.Source, canonical string) string {
+	name := strings.TrimSpace(source.Name)
+	switch source.SourceType {
+	case "podcast", "youtube", "rss":
+		if name != "" {
+			return name
+		}
+	}
+	host := hostOf(canonical)
+	if host == "" || cdnHost(host) {
+		return name
+	}
+	return host
+}
+
+func cdnHost(host string) bool {
+	host = strings.ToLower(strings.TrimPrefix(strings.TrimSpace(host), "www."))
+	if host == "" {
+		return false
+	}
+	markers := []string{
+		"omny.fm",
+		"omnystudio.com",
+		"libsyn.com",
+		"spreaker.com",
+		"art19.com",
+		"art19-episode-locator",
+		"megaphone.fm",
+		"simplecast.com",
+		"podbean.com",
+		"anchor.fm",
+		"buzzsprout.com",
+		"transistor.fm",
+		"captivate.fm",
+		"fireside.fm",
+		"acast.com",
+		"podtrac.com",
+		"chtbl.com",
+		"pippa.io",
+	}
+	for _, marker := range markers {
+		if host == marker || strings.HasSuffix(host, "."+marker) || strings.Contains(host, marker) {
+			return true
+		}
+	}
+	return false
 }
 
 func ParseHN(data []byte) ([]model.IngestItem, error) {
