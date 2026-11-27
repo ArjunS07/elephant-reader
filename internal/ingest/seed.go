@@ -4,6 +4,7 @@ import (
 	"context"
 	"embed"
 	"encoding/json"
+	"errors"
 	"fmt"
 
 	"elephant/internal/db"
@@ -82,6 +83,9 @@ func Seed(ctx context.Context, store *db.Store) error {
 	}
 	for _, item := range file.Items {
 		result, err := svc.ingestOne(item.IngestItem)
+		if errors.Is(err, errYouTubeShort) {
+			continue
+		}
 		if err != nil {
 			return fmt.Errorf("item %s: %w", item.Title, err)
 		}

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/url"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -149,6 +150,9 @@ func EntriesToItems(source model.Source, entries []FeedEntry) []model.IngestItem
 		if link == "" {
 			continue
 		}
+		if IsYouTubeShort(source, link, entry.ID, entry.Title) {
+			continue
+		}
 		external := strings.TrimSpace(entry.ID)
 		if external == "" {
 			external = link
@@ -262,25 +266,255 @@ func ParseHN(data []byte) ([]model.IngestItem, error) {
 	return out, nil
 }
 
+// feedTimeLayouts covers Atom, RSS, RFC 3339, and the RFC 2822/822 variants
+// podcast feeds actually emit. Go's RFC1123 requires a zero-padded day, so
+// single-digit days ("Fri, 4 Mar 2022") need their own layouts.
+var feedTimeLayouts = []string{
+	time.RFC3339Nano,
+	time.RFC3339,
+	time.RFC1123Z,
+	time.RFC1123,
+	time.RFC850,
+	time.RFC822Z,
+	time.RFC822,
+	time.RubyDate,
+	time.UnixDate,
+	time.ANSIC,
+	"Mon, 2 Jan 2006 15:04:05 -0700",
+	"Mon, 2 Jan 2006 15:04:05 Z0700",
+	"Mon, 2 Jan 2006 15:04:05 -07:00",
+	"Mon, 2 Jan 2006 15:04:05 Z07:00",
+	"Mon, 2 Jan 2006 15:04:05 MST",
+	"Mon, 2 Jan 2006 15:04:05 Z",
+	"Mon, 02 Jan 2006 15:04:05 -0700",
+	"Mon, 02 Jan 2006 15:04:05 -07:00",
+	"Mon, 02 Jan 2006 15:04:05 MST",
+	"Monday, 2 Jan 2006 15:04:05 -0700",
+	"Monday, 2 Jan 2006 15:04:05 MST",
+	"Monday, 02 Jan 2006 15:04:05 -0700",
+	"Monday, 02 Jan 2006 15:04:05 MST",
+	"Mon, 2 Jan 2006 15:04 -0700",
+	"Mon, 2 Jan 2006 15:04 -07:00",
+	"Mon, 2 Jan 2006 15:04 MST",
+	"Mon, 02 Jan 2006 15:04 -0700",
+	"Mon, 02 Jan 2006 15:04 -07:00",
+	"Mon, 02 Jan 2006 15:04 MST",
+	"Mon, 2 Jan 2006 15:04:05",
+	"Mon, 02 Jan 2006 15:04:05",
+	"Mon, 2 Jan 2006 15:04",
+	"Mon, 02 Jan 2006 15:04",
+	"2 Jan 2006 15:04:05 -0700",
+	"2 Jan 2006 15:04:05 -07:00",
+	"2 Jan 2006 15:04:05 MST",
+	"02 Jan 2006 15:04:05 -0700",
+	"02 Jan 2006 15:04:05 -07:00",
+	"02 Jan 2006 15:04:05 MST",
+	"2 Jan 2006 15:04 -0700",
+	"2 Jan 2006 15:04 MST",
+	"02 Jan 2006 15:04 -0700",
+	"02 Jan 2006 15:04 MST",
+	"2 Jan 2006 15:04:05",
+	"02 Jan 2006 15:04:05",
+	"Mon, 2 Jan 06 15:04:05 -0700",
+	"Mon, 2 Jan 06 15:04:05 -07:00",
+	"Mon, 2 Jan 06 15:04:05 MST",
+	"Mon, 02 Jan 06 15:04:05 -0700",
+	"Mon, 02 Jan 06 15:04:05 MST",
+	"Mon, 2 Jan 06 15:04 -0700",
+	"Mon, 2 Jan 06 15:04 MST",
+	"Mon, 02 Jan 06 15:04 -0700",
+	"Mon, 02 Jan 06 15:04 MST",
+	"2 Jan 06 15:04:05 -0700",
+	"2 Jan 06 15:04:05 MST",
+	"02 Jan 06 15:04:05 -0700",
+	"02 Jan 06 15:04:05 MST",
+	"2 Jan 06 15:04 -0700",
+	"2 Jan 06 15:04 MST",
+	"02 Jan 06 15:04 -0700",
+	"02 Jan 06 15:04 MST",
+	"2006-01-02 15:04:05 -0700",
+	"2006-01-02 15:04:05 -07:00",
+	"2006-01-02 15:04:05 MST",
+	"2006-01-02T15:04:05-0700",
+	"2006-01-02T15:04:05-07:00",
+	"2006-01-02 15:04:05",
+	"2006-01-02T15:04:05",
+	"2006-01-02",
+}
+
+var (
+	parenCommentRE = regexp.MustCompile(`\s*\([^)]*\)`)
+	spaceCommaRE   = regexp.MustCompile(`\s+,`)
+)
+
+// abbrevOffset is the UTC offset, in seconds, of zone abbreviations Go does
+// not know when the process location is UTC. RSS feeds name the zone
+// ("EST", "PST") instead of sending a numeric offset.
+var abbrevOffset = map[string]int{
+	"GMT":  0,
+	"UTC":  0,
+	"WET":  0,
+	"EST":  -5 * 3600,
+	"EDT":  -4 * 3600,
+	"CST":  -6 * 3600,
+	"CDT":  -5 * 3600,
+	"MST":  -7 * 3600,
+	"MDT":  -6 * 3600,
+	"PST":  -8 * 3600,
+	"PDT":  -7 * 3600,
+	"AKST": -9 * 3600,
+	"AKDT": -8 * 3600,
+	"HST":  -10 * 3600,
+	"AST":  -4 * 3600,
+	"ADT":  -3 * 3600,
+	"NST":  -3*3600 - 30*60,
+	"NDT":  -2*3600 - 30*60,
+	"CET":  1 * 3600,
+	"CEST": 2 * 3600,
+	"BST":  1 * 3600,
+	"WEST": 1 * 3600,
+	"EET":  2 * 3600,
+	"EEST": 3 * 3600,
+	"JST":  9 * 3600,
+	"KST":  9 * 3600,
+	"AEST": 10 * 3600,
+	"AEDT": 11 * 3600,
+	"ACST": 9*3600 + 30*60,
+	"ACDT": 10*3600 + 30*60,
+	"AWST": 8 * 3600,
+	"NZST": 12 * 3600,
+	"NZDT": 13 * 3600,
+}
+
 func ParseTime(value string) (time.Time, error) {
-	value = strings.TrimSpace(value)
-	layouts := []string{
-		time.RFC3339,
-		time.RFC3339Nano,
-		time.RFC1123Z,
-		time.RFC1123,
-		"2006-01-02 15:04:05",
-		"2006-01-02",
+	original := value
+	value = normalizeFeedTime(value)
+	if value == "" {
+		return time.Time{}, fmt.Errorf("parse time %q: empty", strings.TrimSpace(original))
 	}
 	var last error
-	for _, layout := range layouts {
+	for _, layout := range feedTimeLayouts {
 		parsed, err := time.Parse(layout, value)
 		if err == nil {
-			return parsed, nil
+			return applyZoneAbbrev(parsed), nil
 		}
 		last = err
 	}
-	return time.Time{}, fmt.Errorf("parse time %q: %w", value, last)
+	return time.Time{}, fmt.Errorf("parse time %q: %w", strings.TrimSpace(original), last)
+}
+
+func normalizeFeedTime(value string) string {
+	value = strings.TrimSpace(value)
+	value = parenCommentRE.ReplaceAllString(value, " ")
+	if i := strings.IndexByte(value, '('); i >= 0 {
+		value = value[:i]
+	}
+	value = spaceCommaRE.ReplaceAllString(value, ",")
+	fields := strings.Fields(value)
+	if len(fields) == 0 {
+		return ""
+	}
+	if zone, ok := canonicalZone(fields[len(fields)-1]); ok {
+		fields[len(fields)-1] = zone
+	}
+	value = strings.Join(fields, " ")
+	if len(value) >= 11 && value[10] == 't' && strings.IndexByte(value, ' ') < 0 {
+		value = value[:10] + "T" + value[11:]
+	}
+	if strings.HasSuffix(value, "z") && strings.Contains(value, "T") {
+		value = value[:len(value)-1] + "Z"
+	}
+	return value
+}
+
+func canonicalZone(token string) (string, bool) {
+	if token == "" {
+		return "", false
+	}
+	switch token[0] {
+	case '+', '-', '0', '1', '2', '3', '4', '5', '6', '7', '8', '9':
+		return "", false
+	}
+	upper := strings.ToUpper(token)
+	for _, r := range upper {
+		if r < 'A' || r > 'Z' {
+			return "", false
+		}
+	}
+	if len(upper) < 1 || len(upper) > 5 {
+		return "", false
+	}
+	if upper == "UT" {
+		return "UTC", true
+	}
+	return upper, true
+}
+
+func applyZoneAbbrev(t time.Time) time.Time {
+	name, offset := t.Zone()
+	if offset != 0 {
+		return t
+	}
+	want, ok := abbrevOffset[strings.ToUpper(name)]
+	if !ok || want == 0 {
+		return t
+	}
+	utc := t.In(time.UTC)
+	return time.Date(utc.Year(), utc.Month(), utc.Day(), utc.Hour(), utc.Minute(), utc.Second(), utc.Nanosecond(), time.FixedZone(strings.ToUpper(name), want))
+}
+
+// IsYouTubeShort reports whether an item is a YouTube Short.
+// A Short is a YouTube URL whose path contains /shorts/, or a YouTube item
+// whose title carries a #short or #shorts hashtag. Duration is ignored so a
+// one-minute /watch video is kept.
+func IsYouTubeShort(source model.Source, canonicalURL, actionURL, title string) bool {
+	if youtubeShortsPath(canonicalURL) || youtubeShortsPath(actionURL) {
+		return true
+	}
+	if source.SourceType == "youtube" || youtubePage(canonicalURL) || youtubePage(actionURL) {
+		return shortsHashtag(title)
+	}
+	return false
+}
+
+var shortsHashtagRE = regexp.MustCompile(`(?i)(?:^|[^A-Za-z0-9_])#shorts?(?:$|[^A-Za-z0-9_])`)
+
+func shortsHashtag(title string) bool {
+	return shortsHashtagRE.MatchString(title)
+}
+
+func youtubeShortsPath(raw string) bool {
+	if !strings.Contains(strings.ToLower(raw), "/shorts/") {
+		return false
+	}
+	parsed, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil || parsed.Hostname() == "" || !youtubeHost(parsed.Hostname()) {
+		return false
+	}
+	path := parsed.EscapedPath()
+	if path == "" {
+		path = parsed.Path
+	}
+	return strings.Contains(strings.ToLower(path), "/shorts/")
+}
+
+func youtubePage(raw string) bool {
+	parsed, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil || parsed.Hostname() == "" {
+		return false
+	}
+	return youtubeHost(parsed.Hostname())
+}
+
+func youtubeHost(host string) bool {
+	host = strings.ToLower(strings.TrimSpace(host))
+	host = strings.TrimPrefix(host, "www.")
+	switch host {
+	case "youtube.com", "youtu.be", "youtube-nocookie.com":
+		return true
+	default:
+		return strings.HasSuffix(host, ".youtube.com")
+	}
 }
 
 func parseDuration(value string) int {

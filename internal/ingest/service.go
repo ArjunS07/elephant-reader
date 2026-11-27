@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -17,6 +18,9 @@ import (
 	"elephant/internal/db"
 	"elephant/internal/model"
 )
+
+// errYouTubeShort tells callers to drop the item. Shorts are not stored.
+var errYouTubeShort = errors.New("skip youtube short")
 
 type Service struct {
 	Store *db.Store
@@ -47,6 +51,9 @@ func (s *Service) Ingest(ctx context.Context, inputs []model.IngestItem) ([]mode
 	var out []model.IngestResult
 	for _, input := range inputs {
 		result, err := s.ingestOne(input)
+		if errors.Is(err, errYouTubeShort) {
+			continue
+		}
 		if err != nil {
 			return nil, err
 		}
@@ -69,6 +76,9 @@ func (s *Service) ingestOne(input model.IngestItem) (model.IngestResult, error) 
 		return model.IngestResult{}, err
 	}
 	input.SourceID = source.ID
+	if IsYouTubeShort(source, input.CanonicalURL, input.ActionURL, input.Title) {
+		return model.IngestResult{}, errYouTubeShort
+	}
 	if strings.TrimSpace(input.ExternalID) == "" {
 		input.ExternalID = input.CanonicalURL
 	}
