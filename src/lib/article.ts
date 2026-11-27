@@ -1,5 +1,5 @@
 import type { Item, Source } from '../types.ts'
-import { formatDate } from './format.ts'
+import { durationLabel, formatDate, safeUrl } from './format.ts'
 import { escapeHtml, markdownToHtml } from './markdown.ts'
 
 export function byline(item: Item, source: Source | undefined, when = item.publishedAt): string {
@@ -9,7 +9,8 @@ export function byline(item: Item, source: Source | undefined, when = item.publi
   const date = formatDate(when)
   if (date) parts.push(date)
   if (item.metadata.kind === 'youtube' || item.metadata.kind === 'podcast') {
-    parts.push(`${item.metadata.durationMin} min`)
+    const duration = durationLabel(item.metadata.durationMin)
+    if (duration) parts.push(duration)
   }
   if (item.metadata.kind === 'hn') {
     parts.push(`${item.metadata.points} pts`)
@@ -21,18 +22,23 @@ export function byline(item: Item, source: Source | undefined, when = item.publi
 export function articleHtml(item: Item, source: Source | undefined): string {
   if (item.metadata.kind === 'paper') {
     const paper = item.metadata
+    const authors = (paper.authors ?? []).filter(Boolean).join(', ')
+    const affiliation = [...(paper.affiliations ?? []), paper.venue].filter(Boolean).join(' · ')
     const links = (paper.links ?? [])
-      .map(
-        (link) =>
-          `<a href="${escapeHtml(link.url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(link.label)}</a>`,
-      )
+      .map((link) => {
+        const label = escapeHtml(link.label)
+        const href = safeUrl(link.url)
+        if (!href) return `<span>${label}</span>`
+        return `<a href="${escapeHtml(href)}" target="_blank" rel="noopener noreferrer">${label}</a>`
+      })
+      .filter(Boolean)
       .join('')
     return [
-      `<p class="authors">${escapeHtml((paper.authors ?? []).join(', '))}</p>`,
-      `<p class="affiliations">${escapeHtml([...paper.affiliations, paper.venue].filter(Boolean).join(' · '))}</p>`,
+      authors ? `<p class="authors">${escapeHtml(authors)}</p>` : '',
+      affiliation ? `<p class="affiliations">${escapeHtml(affiliation)}</p>` : '',
       `<p class="byline">${escapeHtml(formatDate(item.publishedAt))}</p>`,
-      `<p class="abstract">${escapeHtml(paper.abstract)}</p>`,
-      `<p class="paper-links">${links}</p>`,
+      paper.abstract ? `<p class="abstract">${escapeHtml(paper.abstract)}</p>` : '',
+      links ? `<p class="paper-links">${links}</p>` : '',
     ].join('')
   }
 

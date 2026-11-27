@@ -1,3 +1,5 @@
+import { safeUrl } from './format.ts'
+
 export function escapeHtml(value: string): string {
   return value
     .replace(/&/g, '&amp;')
@@ -6,13 +8,67 @@ export function escapeHtml(value: string): string {
     .replace(/"/g, '&quot;')
 }
 
+function unescapeHtml(value: string): string {
+  return value
+    .replace(/&quot;/g, '"')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&amp;/g, '&')
+}
+
+function linkHtml(label: string, href: string): string {
+  const safe = safeUrl(unescapeHtml(href.trim()))
+  if (!safe) return label
+  return `<a href="${escapeHtml(safe)}" target="_blank" rel="noopener noreferrer">${label}</a>`
+}
+
+function replaceLinks(escaped: string): string {
+  let out = ''
+  let i = 0
+  while (i < escaped.length) {
+    const start = escaped.indexOf('[', i)
+    if (start < 0 || escaped.indexOf('](', start) < 0) {
+      out += escaped.slice(i)
+      break
+    }
+    const mid = escaped.indexOf('](', start)
+    const label = escaped.slice(start + 1, mid)
+    if (!label || label.includes('[') || label.includes(']') || label.includes('\n')) {
+      out += escaped.slice(i, start + 1)
+      i = start + 1
+      continue
+    }
+    let depth = 1
+    let j = mid + 2
+    for (; j < escaped.length; j += 1) {
+      const ch = escaped[j]
+      if (ch === '(') depth += 1
+      else if (ch === ')') {
+        depth -= 1
+        if (depth === 0) break
+      } else if (ch === '\n') break
+    }
+    if (depth !== 0) {
+      out += escaped.slice(i, start + 1)
+      i = start + 1
+      continue
+    }
+    const href = escaped.slice(mid + 2, j)
+    out += escaped.slice(i, start) + linkHtml(label, href)
+    i = j + 1
+  }
+  return out
+}
+
 function inline(raw: string): string {
   let text = escapeHtml(raw)
-  text = text.replace(/`([^`]+)`/g, '<code>$1</code>')
-  text = text.replace(
-    /\[([^\]]+)\]\(([^)]+)\)/g,
-    '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>',
-  )
+  const codes: string[] = []
+  text = text.replace(/`([^`]+)`/g, (_match, code: string) => {
+    codes.push(`<code>${code}</code>`)
+    return `\uE000${codes.length - 1}\uE000`
+  })
+  text = replaceLinks(text)
+  text = text.replace(/\uE000(\d+)\uE000/g, (_match, index: string) => codes[Number(index)] ?? '')
   text = text.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
   text = text.replace(/\*([^*]+)\*/g, '<em>$1</em>')
   return text
