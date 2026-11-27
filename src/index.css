@@ -1174,6 +1174,92 @@ html[data-align="center"] .reader-frame {
   border-top: 1px solid var(--border);
 }
 
+.gate {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 2.5rem 1.5rem;
+  background: #f7f1df;
+  color: #2f2a22;
+}
+
+.gate-card {
+  width: min(22rem, 100%);
+}
+
+.gate-mark {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  color: #2f2a22;
+  font-family: "Lora", Georgia, serif;
+  font-weight: 600;
+  font-size: 1.35rem;
+  letter-spacing: -0.02em;
+}
+
+.gate p {
+  margin: 1.15rem 0 1.35rem;
+  color: #6e6555;
+  font-family: "Newsreader", "Iowan Old Style", Georgia, serif;
+  font-size: 1.2rem;
+  line-height: 1.45;
+}
+
+.gate form {
+  display: grid;
+  gap: 0.85rem;
+}
+
+.gate label {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.gate label span {
+  color: #968c7a;
+  font-family: "Inter", sans-serif;
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.gate input {
+  width: 100%;
+  margin: 0;
+  padding: 0.45rem 0 0.55rem;
+  background: transparent;
+  border: 0;
+  border-bottom: 1px solid #e3d9be;
+  border-radius: 0;
+  color: #2f2a22;
+  font-family: "Inter", sans-serif;
+  font-size: 16px;
+}
+
+.gate button[type='submit'] {
+  justify-self: start;
+  margin-top: 0.15rem;
+  color: #2c429e;
+  cursor: pointer;
+  font-family: "Inter", sans-serif;
+  font-size: 15px;
+}
+
+.gate button[type='submit']:disabled {
+  color: #968c7a;
+  cursor: default;
+}
+
+.gate .gate-error {
+  min-height: 1.2em;
+  margin: 0;
+  color: #6e6555;
+  font-family: "Inter", sans-serif;
+  font-size: 13px;
+  line-height: 1.4;
+}
+
 @media (max-width: 720px) {
   .bar,
   .sheet,

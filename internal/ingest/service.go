@@ -24,13 +24,16 @@ var errYouTubeShort = errors.New("skip youtube short")
 
 type Service struct {
 	Store *db.Store
-	HTTP  *http.Client
+	// HTTP fetches feeds. New installs SafeClient.
+	// Tests that point feeds at httptest.NewServer should replace HTTP with a
+	// plain client; the safe dialer rejects loopback and private addresses.
+	HTTP *http.Client
 }
 
 func New(store *db.Store) *Service {
 	return &Service{
 		Store: store,
-		HTTP:  &http.Client{Timeout: 15 * time.Second},
+		HTTP:  SafeClient(),
 	}
 }
 
@@ -66,7 +69,9 @@ func (s *Service) Ingest(ctx context.Context, inputs []model.IngestItem) ([]mode
 }
 
 func (s *Service) ingestOne(input model.IngestItem) (model.IngestResult, error) {
-	input.CanonicalURL = strings.TrimSpace(input.CanonicalURL)
+	input.CanonicalURL = SanitizeURL(input.CanonicalURL)
+	input.DiscussionURL = SanitizeURL(input.DiscussionURL)
+	input.ActionURL = SanitizeURL(input.ActionURL)
 	input.Title = strings.TrimSpace(input.Title)
 	if input.CanonicalURL == "" || input.Title == "" {
 		return model.IngestResult{}, fmt.Errorf("title and canonicalUrl are required")
@@ -99,7 +104,7 @@ func (s *Service) ingestOne(input model.IngestItem) (model.IngestResult, error) 
 			input.OpenMode = "reader"
 		}
 	}
-	if strings.TrimSpace(input.ActionURL) == "" {
+	if input.ActionURL == "" {
 		input.ActionURL = input.CanonicalURL
 	}
 	meta, err := mergeMetadata(input.Metadata, input.TractionNote, input.DiscussionQuotes)
@@ -381,6 +386,9 @@ func (s *Service) InboundEmail(to, from, subject, htmlBody, text, receivedAt str
 }
 
 func (s *Service) get(ctx context.Context, endpoint, etag, modified string) ([]byte, feedFetch, bool, error) {
+	if err := validateFetchScheme(endpoint); err != nil {
+		return nil, feedFetch{}, false, err
+	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
 		return nil, feedFetch{}, false, err
@@ -394,7 +402,7 @@ func (s *Service) get(ctx context.Context, endpoint, etag, modified string) ([]b
 	}
 	client := s.HTTP
 	if client == nil {
-		client = http.DefaultClient
+		client = SafeClient()
 	}
 	res, err := client.Do(req)
 	if err != nil {
