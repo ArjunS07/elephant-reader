@@ -46,8 +46,17 @@ export function Header() {
   const { pathname, state } = useLocation()
   const from = (state as { from?: string } | null)?.from
   const current = currentPath(pathname, from)
+  const reader = pathname.startsWith('/item/')
   const [open, setOpen] = useState(false)
   const panel = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    document.documentElement.dataset.surface = reader ? 'reader' : 'list'
+  }, [reader])
+
+  useEffect(() => {
+    setOpen(false)
+  }, [pathname])
 
   useEscape(open, () => setOpen(false))
 
@@ -85,14 +94,14 @@ export function Header() {
           >
             Aa
           </button>
-          {open ? <Settings /> : null}
+          {open ? <Settings reader={reader} /> : null}
         </div>
       </div>
     </header>
   )
 }
 
-function Settings() {
+function Settings({ reader }: { reader: boolean }) {
   const { prefs } = useLibrary()
   const { setPrefs } = useActions()
   return (
@@ -112,6 +121,8 @@ function Settings() {
           ))}
         </div>
       </div>
+      {reader ? (
+      <>
       <div className="setting">
         <span>Font</span>
         <div className="choices">
@@ -159,6 +170,8 @@ function Settings() {
         />
         <span className="slider-value">{prefs.lineHeight.toFixed(2)}</span>
       </label>
+      </>
+      ) : null}
       <div className="setting">
         <span>Align</span>
         <div className="choices">
@@ -174,6 +187,7 @@ function Settings() {
           ))}
         </div>
       </div>
+      {reader ? (
       <div className="setting">
         <span>Width</span>
         <div className="choices">
@@ -196,6 +210,7 @@ function Settings() {
           ))}
         </div>
       </div>
+      ) : null}
     </div>
   )
 }
