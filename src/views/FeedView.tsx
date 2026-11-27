@@ -115,15 +115,6 @@ export function FeedView() {
           ) : null}
         </div>
       </div>
-      {day ? (
-        <DayNav
-          day={day}
-          earliest={earliest || day}
-          latest={latest || day}
-          marked={new Set(days)}
-          onDay={goDay}
-        />
-      ) : null}
       <ItemList
         rows={visible}
         from="feed"
@@ -140,6 +131,15 @@ export function FeedView() {
           setParams(next)
         }}
       />
+      {day ? (
+        <DayNav
+          day={day}
+          earliest={earliest || day}
+          latest={latest || day}
+          marked={new Set(days)}
+          onDay={goDay}
+        />
+      ) : null}
     </main>
   )
 }

@@ -303,7 +303,7 @@ input[type="range"]::-moz-range-thumb {
   display: flex;
   align-items: baseline;
   gap: 0.7rem;
-  padding: 0.15rem 0 0.85rem;
+  padding: 1.15rem 0 0.4rem;
 }
 
 .caret,
@@ -347,7 +347,8 @@ input[type="range"]::-moz-range-thumb {
 
 .calendar {
   position: absolute;
-  top: calc(100% + 4px);
+  top: auto;
+  bottom: calc(100% + 6px);
   left: 0;
   z-index: 25;
   width: 232px;
