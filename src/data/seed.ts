@@ -309,14 +309,17 @@ const items: Item[] = [
         {
           speaker: 'Lena Voss',
           text: 'The friction cone is read out of the same latent the planner searches, so the plan and the safety check cannot disagree about the state.',
+          url: 'https://x.com/lenavoss/status/1859231842100040101',
         },
         {
           speaker: 'Rafael Ito',
           text: 'Most of the win shows up when the fingers hide the socket. Vision-only models hallucinate a clean insertion because the last frame looked fine.',
+          url: 'https://x.com/rafaelito/status/1859234418821108842',
         },
         {
           speaker: 'Priya Raman',
           text: 'We still fail on soft cloth when the contact patch is larger than the sensor. That is a sensor problem as much as a model problem.',
+          url: 'https://x.com/priyaraman/status/1859237022194402290',
         },
       ],
     },
@@ -347,14 +350,17 @@ const items: Item[] = [
         {
           speaker: 'Jonah Adler',
           text: 'Pixel loss is a regularizer. If you let it dominate, you get a pretty video model that cannot keep a pose.',
+          url: 'https://x.com/jonahadler/status/1861042210038841204',
         },
         {
           speaker: 'Mei-Ling Zhou',
           text: 'Ten seconds is not a magic number. It is long enough that a wrong dynamics model cannot hide behind a sharp next frame.',
+          url: 'https://x.com/meilingzhou/status/1861045582109934411',
         },
         {
           speaker: 'Samuel Okonkwo',
           text: 'Shooting in latent space is boring on purpose. If a fancy planner is required, we do not yet trust the model.',
+          url: 'https://x.com/samuelokonkwo/status/1861049017722201188',
         },
       ],
     },
@@ -385,14 +391,17 @@ const items: Item[] = [
         {
           speaker: 'Anika Shah',
           text: 'Colocation looks simpler until you price the idle memory on a prefill-sized GPU that is now emitting one token at a time.',
+          url: 'https://x.com/anikashah/status/1864412201188032201',
         },
         {
           speaker: 'Tom Berger',
           text: 'The KV cache does not move. Once we moved caches we recreated the latency problem we were trying to leave behind.',
+          url: 'https://x.com/tomberger/status/1864415803341190044',
         },
         {
           speaker: 'Hanae Ito',
           text: 'Expert heat is stable over minutes and noisy over milliseconds. The scheduler should be almost bored.',
+          url: 'https://x.com/hanaeito/status/1864419022284417760',
         },
       ],
     },

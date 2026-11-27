@@ -11,7 +11,7 @@ export function CommentaryQuote({ text, name, detail, href }: CommentaryQuotePro
       <p className="commentary-text">{text}</p>
       <figcaption>
         {href ? (
-          <a className="commentary-name" href={href}>
+          <a className="commentary-name" href={href} target="_blank" rel="noopener noreferrer">
             {name}
           </a>
         ) : (

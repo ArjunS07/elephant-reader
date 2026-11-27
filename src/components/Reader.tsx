@@ -246,7 +246,7 @@ export const Reader = memo(function Reader({
             aria-label="Open original"
             {...(isHttpUrl(item.actionUrl) ? { target: '_blank', rel: 'noopener noreferrer' } : {})}
           >
-            <IconExternal size={17} />
+            <IconExternal size={23} />
           </a>
         </h1>
         <div
@@ -261,6 +261,7 @@ export const Reader = memo(function Reader({
             quotes={item.metadata.discussionQuotes.map((quote) => ({
               text: quote.text,
               name: quote.speaker,
+              href: quote.url,
             }))}
           />
         ) : null}

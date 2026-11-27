@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { formatDayHeading, monthLabel, shiftDay } from '../lib/format.ts'
 
 const WEEK = ['S', 'M', 'T', 'W', 'T', 'F', 'S']
@@ -26,9 +26,12 @@ export function DayNav({
   onDay: (day: string) => void
 }) {
   const [open, setOpen] = useState(false)
+  const [place, setPlace] = useState<{ top: number; left: number } | null>(null)
   const [year, month] = day.split('-').map(Number)
   const [cursor, setCursor] = useState({ year, month })
   const root = useRef<HTMLDivElement>(null)
+  const trigger = useRef<HTMLButtonElement>(null)
+  const popover = useRef<HTMLDivElement>(null)
   const prev = day > earliest ? shiftDay(day, -1) : null
   const next = day < latest ? shiftDay(day, 1) : null
 
@@ -45,6 +48,38 @@ export function DayNav({
     return () => document.removeEventListener('mousedown', onPointer)
   }, [open])
 
+  useLayoutEffect(() => {
+    if (!open) {
+      setPlace(null)
+      return
+    }
+    const pad = 12
+    const gap = 8
+    const measure = () => {
+      const button = trigger.current
+      const panel = popover.current
+      if (!button || !panel) return
+      const rect = button.getBoundingClientRect()
+      const width = panel.offsetWidth
+      const height = panel.offsetHeight
+      const spaceAbove = rect.top - pad
+      const spaceBelow = window.innerHeight - rect.bottom - pad
+      const openUp = spaceAbove >= height + gap || spaceAbove > spaceBelow
+      let top = openUp ? rect.top - height - gap : rect.bottom + gap
+      top = Math.max(pad, Math.min(top, window.innerHeight - height - pad))
+      let left = rect.left
+      left = Math.max(pad, Math.min(left, window.innerWidth - width - pad))
+      setPlace((prev) => (prev && prev.top === top && prev.left === left ? prev : { top, left }))
+    }
+    measure()
+    window.addEventListener('resize', measure)
+    window.addEventListener('scroll', measure, true)
+    return () => {
+      window.removeEventListener('resize', measure)
+      window.removeEventListener('scroll', measure, true)
+    }
+  }, [open, cursor])
+
   const cells = cellsFor(cursor.year, cursor.month)
 
   return (
@@ -57,6 +92,7 @@ export function DayNav({
         ›
       </button>
       <button
+        ref={trigger}
         type="button"
         className="calendar-toggle"
         aria-expanded={open}
@@ -66,7 +102,18 @@ export function DayNav({
         Calendar
       </button>
       {open ? (
-        <div className="calendar" role="dialog" aria-label="Calendar" data-overlay>
+        <div
+          ref={popover}
+          className="calendar"
+          role="dialog"
+          aria-label="Calendar"
+          data-overlay
+          style={{
+            top: place?.top ?? 0,
+            left: place?.left ?? 0,
+            visibility: place ? 'visible' : 'hidden',
+          }}
+        >
           <div className="calendar-head">
             <button
               type="button"

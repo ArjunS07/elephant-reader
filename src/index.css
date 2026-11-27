@@ -2,6 +2,7 @@
   --bg: #ffffff;
   --surface: #f8f8fa;
   --fg: #393b3d;
+  --ink: #393b3d;
   --secondary: #6b7280;
   --muted: #9ca3af;
   --accent: #3445fd;
@@ -20,6 +21,7 @@ html[data-theme="dark"] {
   --bg: #1a1921;
   --surface: #23222b;
   --fg: #e4e4e7;
+  --ink: #e4e4e7;
   --secondary: #a1a1aa;
   --muted: #71717a;
   --accent: #5763ff;
@@ -33,6 +35,7 @@ html[data-theme="warm"] {
   --bg: #f7f1df;
   --surface: #efe7d0;
   --fg: #2f2a22;
+  --ink: #2f2a22;
   --secondary: #6e6555;
   --muted: #968c7a;
   --accent: #2c429e;
@@ -135,7 +138,7 @@ html[data-surface="reader"] .bar {
   display: inline-flex;
   align-items: center;
   gap: 0.4rem;
-  color: var(--accent);
+  color: var(--ink);
   font-family: "Lora", Georgia, serif;
   font-weight: 600;
   font-size: 1.15rem;
@@ -149,7 +152,8 @@ html[data-surface="reader"] .bar {
 }
 
 .wordmark:hover {
-  color: var(--accent-hover);
+  color: var(--ink);
+  opacity: 0.72;
 }
 
 .bar nav {
@@ -346,11 +350,8 @@ input[type="range"]::-moz-range-thumb {
 }
 
 .calendar {
-  position: absolute;
-  top: auto;
-  bottom: calc(100% + 6px);
-  left: 0;
-  z-index: 25;
+  position: fixed;
+  z-index: 30;
   width: 232px;
   padding: 0.55rem 0.65rem 0.7rem;
   background: var(--bg);
@@ -704,8 +705,12 @@ html[data-align="center"] .reader-frame {
 .reader a.open-original:link,
 .reader a.open-original:visited {
   display: inline-flex;
+  align-items: center;
+  justify-content: center;
   flex: none;
-  margin-top: 0.4rem;
+  width: 34px;
+  height: 34px;
+  margin-top: 0.22rem;
   color: var(--muted);
   text-decoration: none;
 }
@@ -829,8 +834,29 @@ html[data-align="center"] .reader-frame {
 }
 
 .commentary-name {
+  font-family: Inter, system-ui, sans-serif;
+  font-style: normal;
   font-weight: 500;
   color: var(--secondary);
+}
+
+.reader a.commentary-name,
+.reader a.commentary-name:link,
+.reader a.commentary-name:visited {
+  color: var(--secondary);
+  font-family: Inter, system-ui, sans-serif;
+  font-style: normal;
+  font-weight: 500;
+  font-size: inherit;
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-decoration-color: var(--border);
+  text-underline-offset: 2px;
+}
+
+.reader a.commentary-name:hover {
+  color: var(--ink);
+  text-decoration-color: var(--ink);
 }
 
 .commentary-detail {

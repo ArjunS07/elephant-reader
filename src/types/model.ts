@@ -48,6 +48,7 @@ export interface PaperLink {
 export interface DiscussionQuote {
   speaker: string
   text: string
+  url?: string
 }
 
 export interface PaperMetadata {
