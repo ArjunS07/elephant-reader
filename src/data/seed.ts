@@ -10,24 +10,25 @@ const QUOTE_TRACE =
 
 const latencyMd = `A reader does not experience your architecture. They experience the gap between intending to read the next sentence and seeing it. That gap is the latency budget, and it is smaller than most product reviews admit.
 
-I started keeping a budget the way a film editor keeps a frame count. Two hundred milliseconds to paint the list. Fifty milliseconds to open a piece I have already stored. Zero network calls on the path that marks something read, saved, or dismissed. If a number does not fit, the feature does not ship until it does.
+I started keeping a budget the way a film editor keeps a frame count. Two hundred milliseconds to paint the list. Fifty milliseconds to open a piece I have already stored. Zero network calls on the path that marks something read or saved. If a number does not fit, the feature does not ship until it does.
 
 The expensive mistakes were never the slow queries. They were the states I had fused together. ${QUOTE_CACHE} Treat the budget as a contract with the person, not as a graph in a profiler.
 
 Queues are where the contract gets muddy. People skip. People finish. People park a long essay for a Sunday. ${QUOTE_QUEUE} Search then lies, and the archive fills with things the reader never wanted to remember.
 
-I keep four places, and only one of them means I read this. The firehose is arrival. Later is a promise to my future self. Dismissed is a closed door that does not pretend to be a memory. Read is the archive, and it is the only set search should trust.
+I keep two marks, and only one of them means I read this. The river is arrival. Later is a promise to my future self, and it is not a verdict. Read is the set search should trust.
 
 Half-read is not a fifth place. It is a measure. If I stop partway through an essay in Later, the essay stays in Later. The scroll position is a pencil mark, not a verdict. I should be able to come back, see the mark, and continue without the app congratulating me for a job I did not finish.
 
-> Dismiss is a closed door. Read is a memory. They are not the same door.
+> Saved is not read. Read is a memory. They are not the same mark.
 
-Local storage is enough to learn this. The model is a handful of records: a source, an item, a state, a highlight. The state row is doing the real work. Queue is orthogonal to \`readAt\`. If you let a single enum carry both ideas, you will spend the next year writing migrations that are really apologies.
+Local storage is enough to learn this. The model is a handful of records: a source, an item, a state, a highlight. The state row is doing the real work. \`inLater\` is orthogonal to \`readAt\`. If you let one flag carry both ideas, you will spend the next year writing migrations that are really apologies.
 
 A parked essay, the kind sitting in Later with a pencil mark, is this row:
 
 \`\`\`
-queue: later
+inLater: true
+savedAt: set
 readAt: null
 readProgress: 0.35
 \`\`\`
@@ -36,7 +37,7 @@ Highlights have a similar shape. A quote, a prefix, a suffix, a note. The note i
 
 There is a temptation to add a badge for every state, a pill for every source, a banner for every empty morning. Resist it. The list is the interface. A title, an author, a date, and the few actions a thumb can hit without looking. If a control needs a paragraph of explanation, it is the wrong control.
 
-I measure the budget on a train with a cold phone. Open the app. The list is there. Open the essay. The sentence I left is there, and so is the note I wrote in the margin. Mark it read. It leaves the queue and enters the archive. Dismiss the next one. It leaves the queue and does not enter the archive. The difference is the product.
+I measure the budget on a train with a cold phone. Open the app. The list is there. Open the essay. The sentence I left is there, and so is the note I wrote in the margin. Mark it read. It stays in the river, and it enters search. Saving it for later does not pretend the essay is finished. The difference is the product.
 
 When the budget holds, the reading feels uneventful. That is the point. Speed is not a feature you announce. It is the absence of a reason to leave.`
 
@@ -44,11 +45,11 @@ const cachesMd = `A cache is a product decision wearing an infrastructure costum
 
 ## The haunted list
 
-I learned this from a reading list that felt haunted. Items I had dismissed came back after a refresh. Items I had finished came back as new, because the server treated "not in the inbox" as a single bit and then forgot which door they had left through. The cache was fast. It was faithfully wrong.
+I learned this from a reading list that felt haunted. Items I had finished came back as new, because the server treated "not in the inbox" as a single bit and then forgot whether I had actually read them. The cache was fast. It was faithfully wrong.
 
 ## Who owns what
 
-The rule I use now is dull and strict. The client is the owner of queue and read state. The server is the owner of the document. A feed fetch may add items. It may not resurrect a dismissal, and it may not clear a \`readAt\` that the reader set on a train last night.
+The rule I use now is dull and strict. The client is the owner of saved and read state. The server is the owner of the document. A feed fetch may add items. It may not clear \`inLater\`, and it may not clear a \`readAt\` that the reader set on a train last night.
 
 That split has a cost. You cannot just recompute the inbox from the source of truth, because the source of truth for attention lives on the device. Attention is not a property of the URL. Two people can save the same essay and owe it a completely different kind of time.
 
@@ -63,7 +64,7 @@ state -> write state, keep body
 
 There is a place for a shared cache. Cover images, parsed HTML, the plain text you search across. Those are functions of the document. They can expire. The pencil mark in the margin cannot expire just because a CDN did.
 
-> After the cache is emptied, a dismissed item stays dismissed, a finished essay stays findable, and a half-read piece in Later still opens where I stopped.
+> After the cache is emptied, a saved essay stays saved, a finished essay stays findable, and a half-read piece in Later still opens where I stopped.
 
 If a cache cannot pass that test, it is not a cache. It is a second, worse memory.`
 
@@ -83,7 +84,7 @@ There is a version of this for reading. Search should find that sentence. Search
 
 \`\`\`
 readAt: set
-queue: untouched
+inLater: false
 \`\`\`
 
 So the archive is small on purpose. Read means read. Everything else is a queue, a pencil mark, or a closed door. The trace of your attention is the product. The tokens were only the bill.`
@@ -156,7 +157,7 @@ function anchor(text: string, quote: string): { prefix: string; suffix: string }
 }
 
 function unread(): UserItemState {
-  return { queue: 'firehose', readAt: null, readProgress: 0, dismissedAt: null }
+  return { inLater: false, savedAt: null, readAt: null, readProgress: 0 }
 }
 
 const cacheAnchor = anchor(latencyMd, QUOTE_CACHE)
@@ -507,7 +508,7 @@ const items: Item[] = [
     openMode: 'external',
     actionUrl: 'https://tormund.example/skipped-is-not-finished',
     plainText:
-      'Notes on queue design. Dismiss should leave the inbox and stay out of the archive that search reads.',
+      'Notes on reading state. Saved is not finished, and search should trust only what was actually read.',
     metadata: { kind: 'hn', points: 94, commentCount: 61 },
   },
   {
@@ -572,9 +573,9 @@ const states: Record<string, UserItemState> = {
   item_horizon: unread(),
   item_split: unread(),
   item_sparse: unread(),
-  item_latency: { queue: 'later', readAt: null, readProgress: 0.35, dismissedAt: null },
+  item_latency: { inLater: true, savedAt: '2026-11-21T16:00:00.000Z', readAt: null, readProgress: 0.35 },
   item_caches: unread(),
-  item_traces: { queue: 'firehose', readAt: '2026-11-24T21:05:00.000Z', readProgress: 1, dismissedAt: null },
+  item_traces: { inLater: false, savedAt: null, readAt: '2026-11-24T21:05:00.000Z', readProgress: 1 },
   item_import: unread(),
   item_batch: unread(),
   item_sqlite: unread(),
@@ -582,7 +583,7 @@ const states: Record<string, UserItemState> = {
   item_gpt: unread(),
   item_contact: unread(),
   item_wiki: unread(),
-  item_localfirst: { queue: 'none', readAt: '2026-11-25T18:12:00.000Z', readProgress: 1, dismissedAt: null },
+  item_localfirst: { inLater: false, savedAt: null, readAt: '2026-11-25T18:12:00.000Z', readProgress: 1 },
 }
 
 const highlights: Highlight[] = [
@@ -602,7 +603,7 @@ const highlights: Highlight[] = [
     quote: QUOTE_QUEUE,
     prefix: queueAnchor.prefix,
     suffix: queueAnchor.suffix,
-    note: 'Orthogonal state. Dismiss must not become read.',
+    note: 'Saved is not the same as read.',
     createdAt: '2026-11-21T15:14:00.000Z',
     updatedAt: '2026-11-21T15:14:00.000Z',
   },

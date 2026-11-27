@@ -3,10 +3,9 @@ import type { Highlight, UserPreferences } from '../types/model.ts'
 import type { DataState } from './actions.ts'
 
 export interface Actions {
-  dismiss: (id: string) => void
-  dismissMany: (ids: string[]) => void
   markRead: (id: string) => void
   saveLater: (id: string) => void
+  removeLater: (id: string) => void
   setProgress: (id: string, progress: number) => void
   toggleSource: (id: string) => void
   generateAlias: (id: string) => void

@@ -8,7 +8,7 @@ import { useActions, useLibrary } from '../lib/hooks.ts'
 
 export function LaterView() {
   const library = useLibrary()
-  const { dismiss, markRead, saveLater } = useActions()
+  const { markRead, saveLater, removeLater } = useActions()
   const navigate = useNavigate()
   const rows = rowsFor(library, 'later')
   const [cursor, setCursor] = useState<string | null>(null)
@@ -31,12 +31,6 @@ export function LaterView() {
     r: () => {
       if (cursor) markRead(cursor)
     },
-    d: () => {
-      if (!cursor) return
-      const index = rows.findIndex((row) => row.item.id === cursor)
-      dismiss(cursor)
-      setCursor(rows[index + 1]?.item.id ?? rows[index - 1]?.item.id ?? null)
-    },
     o: () => {
       const row = rows.find((entry) => entry.item.id === cursor)
       if (row) openAction(row.item.actionUrl)
@@ -52,18 +46,17 @@ export function LaterView() {
       <ItemList
         rows={rows}
         from="later"
-        actions={['read', 'dismiss']}
         activeId={cursor}
         showProgress
         date="published"
         onActive={setCursor}
         onLater={saveLater}
-        onRead={markRead}
-        onDismiss={(id) => {
+        onRemove={(id) => {
           const index = rows.findIndex((row) => row.item.id === id)
-          dismiss(id)
+          removeLater(id)
           if (cursor === id) setCursor(rows[index + 1]?.item.id ?? rows[index - 1]?.item.id ?? null)
         }}
+        onRead={markRead}
       />
     </main>
   )

@@ -14,10 +14,10 @@ export interface RowModel {
 }
 
 const EMPTY_STATE: UserItemState = {
-  queue: 'firehose',
+  inLater: false,
+  savedAt: null,
   readAt: null,
   readProgress: 0,
-  dismissedAt: null,
 }
 
 export function stateOf(states: Record<string, UserItemState>, id: string): UserItemState {
@@ -33,10 +33,9 @@ export function rowsFor(library: Library, mode: 'feed' | 'later' | 'read', folde
     if (mode !== 'read' && !source.enabled) continue
     const state = stateOf(library.states, item.id)
     if (mode === 'feed') {
-      if (state.queue !== 'firehose' || state.readAt) continue
       if (folder !== 'All' && source.folder !== folder) continue
     } else if (mode === 'later') {
-      if (state.queue !== 'later' || state.readAt) continue
+      if (!state.inLater || state.readAt) continue
     } else if (!state.readAt) {
       continue
     }

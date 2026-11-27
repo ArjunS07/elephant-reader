@@ -58,13 +58,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
   const actions = useMemo<Actions>(
     () => ({
-      dismiss: (id) => send({ type: 'dismiss', id, now: new Date().toISOString() }),
-      dismissMany: (ids) => {
-        const now = new Date().toISOString()
-        for (const id of ids) send({ type: 'dismiss', id, now })
-      },
       markRead: (id) => send({ type: 'read', id, now: new Date().toISOString() }),
       saveLater: (id) => send({ type: 'later', id, now: new Date().toISOString() }),
+      removeLater: (id) => send({ type: 'remove-later', id }),
       setProgress: (id, progress) => send({ type: 'progress', id, progress }),
       toggleSource: (id) => send({ type: 'toggle-source', id }),
       generateAlias: (id) => send({ type: 'alias', id }),

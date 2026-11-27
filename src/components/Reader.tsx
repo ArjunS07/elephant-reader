@@ -4,7 +4,6 @@ import { applyHighlights, anchorFromRoot, layoutNotes } from '../lib/highlight.t
 import { useEscape } from '../lib/hotkeys.ts'
 import { useActions } from '../lib/hooks.ts'
 import type { Highlight, Item, OpenMode } from '../types/model.ts'
-import { IconBookmark, IconCheck, IconClose, IconExternal } from './Icons.tsx'
 import { openAction } from '../lib/format.ts'
 
 interface NavItem {
@@ -21,6 +20,8 @@ interface ReaderProps {
   initialProgress: number
   from: 'feed' | 'later' | 'read'
   navItems: NavItem[]
+  inLater: boolean
+  isRead: boolean
 }
 
 interface MenuState {
@@ -44,6 +45,8 @@ function propsEqual(a: ReaderProps, b: ReaderProps): boolean {
     a.hlKey === b.hlKey &&
     a.initialProgress === b.initialProgress &&
     a.from === b.from &&
+    a.inLater === b.inLater &&
+    a.isRead === b.isRead &&
     a.navItems.map((item) => item.id).join('|') === b.navItems.map((item) => item.id).join('|')
   )
 }
@@ -56,10 +59,12 @@ export const Reader = memo(function Reader({
   initialProgress,
   from,
   navItems,
+  inLater,
+  isRead,
 }: ReaderProps) {
   const ref = useRef<HTMLDivElement>(null)
   const navigate = useNavigate()
-  const { markRead, saveLater, dismiss, setProgress, addHighlight, updateHighlight, deleteHighlight } = useActions()
+  const { markRead, saveLater, removeLater, setProgress, addHighlight, updateHighlight, deleteHighlight } = useActions()
   const [menu, setMenu] = useState<MenuState | null>(null)
   const [editor, setEditor] = useState<EditorState | null>(null)
   const live = highlights.find((highlight) => highlight.id === editor?.id) ?? null
@@ -142,15 +147,14 @@ export const Reader = memo(function Reader({
         go(-1)
       } else if (event.key === 's') {
         event.preventDefault()
-        saveLater(item.id)
+        if (inLater) removeLater(item.id)
+        else saveLater(item.id)
       } else if (event.key === 'r') {
         event.preventDefault()
-        markRead(item.id)
-        back()
-      } else if (event.key === 'd') {
-        event.preventDefault()
-        dismiss(item.id)
-        back()
+        if (!isRead) {
+          markRead(item.id)
+          back()
+        }
       } else if (event.key === 'o') {
         event.preventDefault()
         openAction(item.actionUrl)
@@ -283,35 +287,30 @@ export const Reader = memo(function Reader({
         </div>
       ) : null}
       <div className="actionbar">
-        <button type="button" className="icon-btn" title="Later (s)" aria-label="Later" onClick={() => saveLater(item.id)}>
-          <IconBookmark />
+        <button
+          type="button"
+          className={inLater ? 'text-action' : 'text-action primary'}
+          aria-pressed={inLater}
+          title={inLater ? 'In Later' : 'Read later (s)'}
+          onClick={() => (inLater ? removeLater(item.id) : saveLater(item.id))}
+        >
+          {inLater ? 'In Later' : 'Read later'}
         </button>
         <button
           type="button"
-          className="icon-btn"
-          title="Mark as read (r)"
-          aria-label="Mark as read"
+          className={isRead ? 'text-action' : 'text-action primary'}
+          aria-pressed={isRead}
+          title={isRead ? 'Read' : 'Mark read (r)'}
           onClick={() => {
+            if (isRead) return
             markRead(item.id)
             back()
           }}
         >
-          <IconCheck />
+          {isRead ? 'Read' : 'Mark read'}
         </button>
-        <button
-          type="button"
-          className="icon-btn"
-          title="Dismiss (d)"
-          aria-label="Dismiss"
-          onClick={() => {
-            dismiss(item.id)
-            back()
-          }}
-        >
-          <IconClose />
-        </button>
-        <button type="button" className="icon-btn" title="Open original (o)" aria-label="Open original" onClick={() => openAction(item.actionUrl)}>
-          <IconExternal size={16} />
+        <button type="button" className="text-action" title="Open original (o)" onClick={() => openAction(item.actionUrl)}>
+          Open original
         </button>
       </div>
     </>

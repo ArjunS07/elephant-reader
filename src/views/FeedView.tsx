@@ -13,28 +13,12 @@ function asFolder(value: string | null): FolderFilter {
 
 export function FeedView() {
   const library = useLibrary()
-  const { dismiss, dismissMany, markRead, saveLater } = useActions()
+  const { markRead, saveLater, removeLater } = useActions()
   const navigate = useNavigate()
   const [params, setParams] = useSearchParams()
   const folder = asFolder(params.get('folder'))
   const rows = rowsFor(library, 'feed', folder)
   const [cursor, setCursor] = useState<string | null>(null)
-
-  const boundaryIndex = () => {
-    if (cursor) {
-      const index = rows.findIndex((row) => row.item.id === cursor)
-      if (index >= 0) return index
-    }
-    const header = document.querySelector('header')
-    const top = (header?.getBoundingClientRect().bottom ?? 0) + 1
-    const nodes = document.querySelectorAll<HTMLElement>('[data-item-id]')
-    for (const node of nodes) {
-      if (node.getBoundingClientRect().bottom > top) {
-        return rows.findIndex((row) => row.item.id === node.dataset.itemId)
-      }
-    }
-    return 0
-  }
 
   const move = (delta: number) => {
     if (!rows.length) return
@@ -48,20 +32,20 @@ export function FeedView() {
     else openAction(row.item.actionUrl)
   }
 
+  const toggleLater = (id: string) => {
+    const state = library.states[id]
+    if (state?.inLater) removeLater(id)
+    else saveLater(id)
+  }
+
   useHotkeys({
     j: () => move(1),
     k: () => move(-1),
     s: () => {
-      if (cursor) saveLater(cursor)
+      if (cursor) toggleLater(cursor)
     },
     r: () => {
       if (cursor) markRead(cursor)
-    },
-    d: () => {
-      if (!cursor) return
-      const index = rows.findIndex((row) => row.item.id === cursor)
-      dismiss(cursor)
-      setCursor(rows[index + 1]?.item.id ?? rows[index - 1]?.item.id ?? null)
     },
     o: () => {
       const row = rows.find((entry) => entry.item.id === cursor)
@@ -91,39 +75,16 @@ export function FeedView() {
             </button>
           ))}
         </div>
-        {rows.length > 0 ? (
-          <div className="sweep">
-            <button
-              type="button"
-              title="Dismiss above"
-              onClick={() => {
-                const index = boundaryIndex()
-                if (index <= 0) return
-                dismissMany(rows.slice(0, index).map((row) => row.item.id))
-              }}
-            >
-              Dismiss above
-            </button>
-            <button type="button" title="Dismiss all" onClick={() => dismissMany(rows.map((row) => row.item.id))}>
-              Dismiss all
-            </button>
-          </div>
-        ) : null}
       </div>
       <ItemList
         rows={rows}
         from="feed"
-        actions={['later', 'read', 'dismiss', 'discussion']}
         activeId={cursor}
         date="published"
         onActive={setCursor}
         onLater={saveLater}
+        onRemove={removeLater}
         onRead={markRead}
-        onDismiss={(id) => {
-          const index = rows.findIndex((row) => row.item.id === id)
-          dismiss(id)
-          if (cursor === id) setCursor(rows[index + 1]?.item.id ?? rows[index - 1]?.item.id ?? null)
-        }}
       />
     </main>
   )

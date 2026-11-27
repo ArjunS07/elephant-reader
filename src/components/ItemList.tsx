@@ -4,34 +4,30 @@ import { byline } from '../lib/article.ts'
 import { excerpt } from '../lib/excerpt.ts'
 import { readPercent } from '../lib/format.ts'
 import type { RowModel } from '../lib/select.ts'
-import { IconBookmark, IconCheck, IconClose, IconDiscussion, IconExternal } from './Icons.tsx'
-
-export type RowAction = 'later' | 'read' | 'dismiss' | 'discussion'
+import { IconDiscussion, IconExternal } from './Icons.tsx'
 
 interface ItemListProps {
   rows: RowModel[]
   from: 'feed' | 'later' | 'read'
-  actions: RowAction[]
   activeId: string | null
   showProgress?: boolean
   date: 'published' | 'read'
   onActive: (id: string) => void
   onLater: (id: string) => void
+  onRemove: (id: string) => void
   onRead: (id: string) => void
-  onDismiss: (id: string) => void
 }
 
 export function ItemList({
   rows,
   from,
-  actions,
   activeId,
   showProgress = false,
   date,
   onActive,
   onLater,
+  onRemove,
   onRead,
-  onDismiss,
 }: ItemListProps) {
   useEffect(() => {
     if (!activeId) return
@@ -45,6 +41,8 @@ export function ItemList({
         const meta = byline(row.item, row.source, date === 'read' ? (row.state.readAt ?? row.item.publishedAt) : row.item.publishedAt)
         const external = row.item.openMode !== 'reader'
         const stub = from === 'read' ? null : excerpt(row.item)
+        const inLater = row.state.inLater
+        const isRead = row.state.readAt != null
         const title = (
           <>
             <span className="title">
@@ -70,6 +68,8 @@ export function ItemList({
             className="row"
             data-item-id={row.item.id}
             data-active={row.item.id === activeId ? 'true' : 'false'}
+            data-read={isRead ? 'true' : 'false'}
+            data-later={inLater ? 'true' : 'false'}
             onMouseEnter={() => onActive(row.item.id)}
           >
             {row.item.openMode === 'reader' ? (
@@ -81,24 +81,30 @@ export function ItemList({
                 {title}
               </a>
             )}
-            {actions.length > 0 ? (
+            {from !== 'read' ? (
               <div className="actions">
-                {actions.includes('later') ? (
-                  <button type="button" className="icon-btn" title="Later (s)" aria-label="Later" onClick={() => onLater(row.item.id)}>
-                    <IconBookmark />
+                {from === 'feed' ? (
+                  <button
+                    type="button"
+                    className={inLater ? 'text-action' : 'text-action primary'}
+                    aria-pressed={inLater}
+                    title={inLater ? 'In Later' : 'Read later (s)'}
+                    onClick={() => (inLater ? onRemove(row.item.id) : onLater(row.item.id))}
+                  >
+                    {inLater ? 'In Later' : 'Read later'}
                   </button>
                 ) : null}
-                {actions.includes('read') ? (
-                  <button type="button" className="icon-btn" title="Mark as read (r)" aria-label="Mark as read" onClick={() => onRead(row.item.id)}>
-                    <IconCheck />
+                {from === 'later' ? (
+                  <button type="button" className="text-action" title="Mark read (r)" onClick={() => onRead(row.item.id)}>
+                    Mark read
                   </button>
                 ) : null}
-                {actions.includes('dismiss') ? (
-                  <button type="button" className="icon-btn" title="Dismiss (d)" aria-label="Dismiss" onClick={() => onDismiss(row.item.id)}>
-                    <IconClose />
+                {from === 'later' ? (
+                  <button type="button" className="text-action" title="Remove" onClick={() => onRemove(row.item.id)}>
+                    Remove
                   </button>
                 ) : null}
-                {actions.includes('discussion') && row.item.discussionUrl ? (
+                {row.item.discussionUrl ? (
                   <a
                     className="icon-btn"
                     href={row.item.discussionUrl}

@@ -20,8 +20,6 @@ export type Folder =
 
 export type OpenMode = 'reader' | 'external' | 'deeplink'
 
-export type Queue = 'firehose' | 'later' | 'dismissed' | 'none'
-
 export type ThemeName = 'light' | 'warm' | 'dark'
 
 export type FontFamily = 'inter' | 'lora' | 'newsreader'
@@ -108,10 +106,10 @@ export interface Item {
 }
 
 export interface UserItemState {
-  queue: Queue
+  inLater: boolean
+  savedAt: string | null
   readAt: string | null
   readProgress: number
-  dismissedAt: string | null
 }
 
 export interface Highlight {

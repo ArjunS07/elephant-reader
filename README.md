@@ -22,12 +22,12 @@ Routes are real URLs (`/feed`, `/later`, `/read`, `/sources`, `/item/:id`). Vite
 
 Types live in `src/types/model.ts`.
 
-Queue (`firehose`, `later`, `dismissed`, `none`) is stored apart from `readAt`.
+User state is `inLater` (with `savedAt`) and `readAt`, plus `readProgress`.
 
-- Dismiss sets `queue` to `dismissed` and `dismissedAt` to now. `readAt` stays empty, so the item leaves Feed and Later and does not enter Read.
-- Mark as read sets `readAt` to now. The item leaves Feed and Later and enters Read.
-- Save to Later sets `queue` to `later` and clears `readAt`.
-- Opening an item in Later stores scroll `readProgress` and leaves the item in Later until it is marked read or dismissed.
+- The Feed is a river. Saving an item or marking it read leaves it in the stream.
+- Later is `inLater` and no `readAt`. Remove clears `inLater` and does not set `readAt`.
+- Mark as read sets `readAt`. The item stays in the river and enters Read.
+- Opening an item in Later stores scroll `readProgress` until it is marked read or removed.
 
 ## Keys
 
@@ -38,4 +38,4 @@ Preferences are applied from `index.html` before paint. Reset demo data on Sourc
 
 ## Keys in the reader
 
-`j` / `k` move, `s` saves to Later, `r` marks read, `d` dismisses, `o` opens the original, `Esc` returns to the list. The same `j` `k` `s` `r` `d` `o` keys work on Feed, and `j` `k` `r` `d` `o` work on Later.
+`j` / `k` move, `s` saves to Later, `r` marks read, `o` opens the original, `Esc` returns to the list. The same `j` `k` `s` `r` `o` keys work on Feed and Later.

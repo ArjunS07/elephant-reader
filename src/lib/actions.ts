@@ -9,9 +9,9 @@ export interface DataState extends Library {
 }
 
 export type DataAction =
-  | { type: 'dismiss'; id: string; now: string }
   | { type: 'read'; id: string; now: string }
   | { type: 'later'; id: string; now: string }
+  | { type: 'remove-later'; id: string }
   | { type: 'progress'; id: string; progress: number }
   | { type: 'toggle-source'; id: string }
   | { type: 'alias'; id: string }
@@ -28,15 +28,6 @@ function withState(state: DataState, id: string, next: UserItemState): DataState
 
 export function reducer(state: DataState, action: DataAction): DataState {
   switch (action.type) {
-    case 'dismiss': {
-      const prev = state.states[action.id]
-      if (!prev) return state
-      return withState(state, action.id, {
-        ...prev,
-        queue: 'dismissed',
-        dismissedAt: action.now,
-      })
-    }
     case 'read': {
       const prev = state.states[action.id]
       if (!prev) return state
@@ -47,9 +38,17 @@ export function reducer(state: DataState, action: DataAction): DataState {
       if (!prev) return state
       return withState(state, action.id, {
         ...prev,
-        queue: 'later',
-        readAt: null,
-        dismissedAt: null,
+        inLater: true,
+        savedAt: action.now,
+      })
+    }
+    case 'remove-later': {
+      const prev = state.states[action.id]
+      if (!prev) return state
+      return withState(state, action.id, {
+        ...prev,
+        inLater: false,
+        savedAt: null,
       })
     }
     case 'progress': {
@@ -86,12 +85,12 @@ export function reducer(state: DataState, action: DataAction): DataState {
       const nextState: UserItemState =
         action.mode === 'later'
           ? {
-              queue: 'later',
+              inLater: true,
+              savedAt: action.now,
               readAt: null,
               readProgress: existing ? (state.states[existing.id]?.readProgress ?? 0) : 0,
-              dismissedAt: null,
             }
-          : { queue: 'none', readAt: action.now, readProgress: 1, dismissedAt: null }
+          : { inLater: false, savedAt: null, readAt: action.now, readProgress: 1 }
       if (existing) {
         return {
           ...state,

@@ -155,9 +155,9 @@ function Settings() {
         <div className="choices">
           {(
             [
-              ['narrow', '600', 'Narrow, 600px'],
-              ['default', '672', 'Default, 672px'],
-              ['wide', '760', 'Wide, 760px'],
+              ['narrow', 'Cozy', 'Cozy, 600px'],
+              ['default', 'Standard', 'Standard, 672px'],
+              ['wide', 'Wide', 'Wide, 760px'],
             ] as const
           ).map(([value, label, title]) => (
             <button

@@ -5,10 +5,10 @@ import { articleHtml } from '../lib/article.ts'
 import { rowsFor } from '../lib/select.ts'
 import { useLibrary } from '../lib/hooks.ts'
 
-function originOf(from: unknown, queue: string, readAt: string | null): 'feed' | 'later' | 'read' {
+function originOf(from: unknown, inLater: boolean, readAt: string | null): 'feed' | 'later' | 'read' {
   if (from === 'feed' || from === 'later' || from === 'read') return from
   if (readAt) return 'read'
-  if (queue === 'later') return 'later'
+  if (inLater) return 'later'
   return 'feed'
 }
 
@@ -35,12 +35,12 @@ export function ItemView() {
 
   const source = library.sources.find((entry) => entry.id === item.sourceId)
   const state = library.states[item.id] ?? {
-    queue: 'firehose' as const,
+    inLater: false,
+    savedAt: null,
     readAt: null,
     readProgress: 0,
-    dismissedAt: null,
   }
-  const from = originOf(fromState, state.queue, state.readAt)
+  const from = originOf(fromState, state.inLater, state.readAt)
   const highlights = library.highlights.filter((highlight) => highlight.itemId === item.id)
   const hlKey = highlights.map((highlight) => `${highlight.id}:${highlight.quote}:${highlight.note}`).join('|')
   const navItems = rowsFor(library, from).map((row) => ({
@@ -60,6 +60,8 @@ export function ItemView() {
         initialProgress={initialProgress}
         from={from}
         navItems={navItems}
+        inLater={state.inLater}
+        isRead={state.readAt != null}
       />
     </main>
   )

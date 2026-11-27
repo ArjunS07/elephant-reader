@@ -8,7 +8,7 @@ import { useActions, useLibrary } from '../lib/hooks.ts'
 
 export function ReadView() {
   const library = useLibrary()
-  const { dismiss, markRead, saveLater } = useActions()
+  const { markRead, saveLater, removeLater } = useActions()
   const navigate = useNavigate()
   const [query, setQuery] = useState('')
   const [cursor, setCursor] = useState<string | null>(null)
@@ -57,13 +57,12 @@ export function ReadView() {
       <ItemList
         rows={rows}
         from="read"
-        actions={[]}
         activeId={cursor}
         date="read"
         onActive={setCursor}
         onLater={saveLater}
+        onRemove={removeLater}
         onRead={markRead}
-        onDismiss={dismiss}
       />
     </main>
   )
