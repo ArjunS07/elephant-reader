@@ -6,6 +6,7 @@ import (
 	"encoding/xml"
 	"fmt"
 	"io"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -176,6 +177,11 @@ func EntriesToItems(source model.Source, entries []FeedEntry) []model.IngestItem
 		if !model.ValidOpenMode(mode) {
 			mode = "reader"
 		}
+		action := link
+		if overcast := overcastAction(source); overcast != "" {
+			action = overcast
+			mode = "deeplink"
+		}
 		out = append(out, model.IngestItem{
 			SourceID:        source.ID,
 			ExternalID:      external,
@@ -184,13 +190,26 @@ func EntriesToItems(source model.Source, entries []FeedEntry) []model.IngestItem
 			Author:          strings.TrimSpace(entry.Author),
 			PublishedAt:     published.UTC().Format(time.RFC3339),
 			OpenMode:        mode,
-			ActionURL:       link,
+			ActionURL:       action,
 			ContentMarkdown: markdown,
 			PlainText:       plain,
 			Metadata:        raw,
 		})
 	}
 	return out
+}
+
+func overcastAction(source model.Source) string {
+	if source.SourceType != "podcast" || source.Config == nil {
+		return ""
+	}
+	if raw, ok := source.Config["overcastUrl"].(string); ok && strings.TrimSpace(raw) != "" {
+		return strings.TrimSpace(raw)
+	}
+	if id, ok := source.Config["overcastId"].(string); ok && strings.TrimSpace(id) != "" && strings.TrimSpace(source.FeedURL) != "" {
+		return "overcast://x-callback-url/add?url=" + url.QueryEscape(source.FeedURL)
+	}
+	return ""
 }
 
 func ParseHN(data []byte) ([]model.IngestItem, error) {

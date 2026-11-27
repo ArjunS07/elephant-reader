@@ -17,7 +17,7 @@ SELECT
   i.title, i.author, i.published_at, i.published_day, i.open_mode, i.action_url,
   i.content_markdown, i.plain_text, i.excerpt, i.metadata_json, i.created_at, i.updated_at,
   src.id, src.name, src.source_type, src.folder, src.default_open_mode, src.default_queue,
-  src.feed_url, src.email_alias, src.config_json, src.enabled, src.last_fetched_at, src.created_at, src.updated_at,
+  src.feed_url, src.email_alias, src.config_json, src.enabled, src.last_fetched_at, src.etag, src.last_modified, src.created_at, src.updated_at,
   IFNULL(st.in_later, 0), st.saved_at, st.read_at, IFNULL(st.read_progress, 0),
   (SELECT COUNT(*) FROM highlights h WHERE h.item_id = i.id)
 FROM items i
@@ -50,8 +50,8 @@ func (s *Store) UpsertSource(src model.Source) (model.Source, error) {
 	_, err = s.SQL.Exec(`
 INSERT INTO sources (
   id, name, source_type, folder, default_open_mode, default_queue,
-  feed_url, email_alias, config_json, enabled, last_fetched_at, created_at, updated_at
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  feed_url, email_alias, config_json, enabled, last_fetched_at, etag, last_modified, created_at, updated_at
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(id) DO UPDATE SET
   name = excluded.name,
   source_type = excluded.source_type,
@@ -66,7 +66,7 @@ ON CONFLICT(id) DO UPDATE SET
   config_json = excluded.config_json,
   updated_at = excluded.updated_at
 `, src.ID, src.Name, src.SourceType, src.Folder, src.DefaultOpenMode, src.DefaultQueue,
-		NullString(src.FeedURL), NullString(src.EmailAlias), string(config), enabled, nil, src.CreatedAt, src.UpdatedAt)
+		NullString(src.FeedURL), NullString(src.EmailAlias), string(config), enabled, nil, NullString(src.ETag), NullString(src.LastModified), src.CreatedAt, src.UpdatedAt)
 	if err != nil {
 		return model.Source{}, err
 	}
@@ -93,10 +93,10 @@ func (s *Store) InsertSource(src model.Source) (model.Source, error) {
 	_, err = s.SQL.Exec(`
 INSERT INTO sources (
   id, name, source_type, folder, default_open_mode, default_queue,
-  feed_url, email_alias, config_json, enabled, last_fetched_at, created_at, updated_at
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?)
+  feed_url, email_alias, config_json, enabled, last_fetched_at, etag, last_modified, created_at, updated_at
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?)
 `, src.ID, src.Name, src.SourceType, src.Folder, src.DefaultOpenMode, src.DefaultQueue,
-		NullString(src.FeedURL), NullString(src.EmailAlias), string(config), enabled, src.CreatedAt, src.UpdatedAt)
+		NullString(src.FeedURL), NullString(src.EmailAlias), string(config), enabled, NullString(src.ETag), NullString(src.LastModified), src.CreatedAt, src.UpdatedAt)
 	if err != nil {
 		return model.Source{}, err
 	}
@@ -106,7 +106,7 @@ INSERT INTO sources (
 func (s *Store) ListSources() ([]model.Source, error) {
 	rows, err := s.SQL.Query(`
 SELECT id, name, source_type, folder, default_open_mode, default_queue,
-  feed_url, email_alias, config_json, enabled, last_fetched_at, created_at, updated_at
+  feed_url, email_alias, config_json, enabled, last_fetched_at, etag, last_modified, created_at, updated_at
 FROM sources
 ORDER BY name COLLATE NOCASE, id
 `)
@@ -131,7 +131,7 @@ ORDER BY name COLLATE NOCASE, id
 func (s *Store) GetSource(id string) (model.Source, error) {
 	row := s.SQL.QueryRow(`
 SELECT id, name, source_type, folder, default_open_mode, default_queue,
-  feed_url, email_alias, config_json, enabled, last_fetched_at, created_at, updated_at
+  feed_url, email_alias, config_json, enabled, last_fetched_at, etag, last_modified, created_at, updated_at
 FROM sources WHERE id = ?
 `, id)
 	src, err := scanSource(row)
@@ -144,7 +144,7 @@ FROM sources WHERE id = ?
 func (s *Store) FindSourceByAlias(alias string) (model.Source, error) {
 	row := s.SQL.QueryRow(`
 SELECT id, name, source_type, folder, default_open_mode, default_queue,
-  feed_url, email_alias, config_json, enabled, last_fetched_at, created_at, updated_at
+  feed_url, email_alias, config_json, enabled, last_fetched_at, etag, last_modified, created_at, updated_at
 FROM sources WHERE lower(email_alias) = lower(?)
 `, strings.TrimSpace(alias))
 	src, err := scanSource(row)
@@ -152,6 +152,23 @@ FROM sources WHERE lower(email_alias) = lower(?)
 		return model.Source{}, ErrNotFound
 	}
 	return src, err
+}
+
+func (s *Store) FeedURLs() (map[string]struct{}, error) {
+	rows, err := s.SQL.Query(`SELECT feed_url FROM sources WHERE feed_url IS NOT NULL AND feed_url != ''`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string]struct{}{}
+	for rows.Next() {
+		var raw string
+		if err := rows.Scan(&raw); err != nil {
+			return nil, err
+		}
+		out[raw] = struct{}{}
+	}
+	return out, rows.Err()
 }
 
 func (s *Store) AliasTaken(alias string) (bool, error) {
@@ -172,6 +189,9 @@ type SourcePatch struct {
 	HasConfig       bool
 	LastFetchedAt   *string
 	TouchFetched    bool
+	ETag            *string
+	LastModified    *string
+	TouchValidators bool
 }
 
 func (s *Store) PatchSource(id string, patch SourcePatch) (model.Source, error) {
@@ -206,6 +226,10 @@ func (s *Store) PatchSource(id string, patch SourcePatch) (model.Source, error) 
 	if patch.TouchFetched {
 		current.LastFetchedAt = patch.LastFetchedAt
 	}
+	if patch.TouchValidators {
+		current.ETag = deref(patch.ETag)
+		current.LastModified = deref(patch.LastModified)
+	}
 	if current.Config == nil {
 		current.Config = map[string]any{}
 	}
@@ -222,11 +246,11 @@ func (s *Store) PatchSource(id string, patch SourcePatch) (model.Source, error) 
 UPDATE sources SET
   name = ?, folder = ?, default_open_mode = ?, default_queue = ?,
   feed_url = ?, email_alias = ?, config_json = ?, enabled = ?,
-  last_fetched_at = ?, updated_at = ?
+  last_fetched_at = ?, etag = ?, last_modified = ?, updated_at = ?
 WHERE id = ?
 `, current.Name, current.Folder, current.DefaultOpenMode, current.DefaultQueue,
 		NullString(current.FeedURL), NullString(current.EmailAlias), string(config), enabled,
-		nullablePtr(current.LastFetchedAt), now, id)
+		nullablePtr(current.LastFetchedAt), NullString(current.ETag), NullString(current.LastModified), now, id)
 	if err != nil {
 		return model.Source{}, err
 	}
@@ -727,11 +751,11 @@ type scanner interface {
 
 func scanSource(sc scanner) (model.Source, error) {
 	var src model.Source
-	var feed, alias, config, fetched sql.NullString
+	var feed, alias, config, fetched, etag, modified sql.NullString
 	var enabled int
 	err := sc.Scan(
 		&src.ID, &src.Name, &src.SourceType, &src.Folder, &src.DefaultOpenMode, &src.DefaultQueue,
-		&feed, &alias, &config, &enabled, &fetched, &src.CreatedAt, &src.UpdatedAt,
+		&feed, &alias, &config, &enabled, &fetched, &etag, &modified, &src.CreatedAt, &src.UpdatedAt,
 	)
 	if err != nil {
 		return model.Source{}, err
@@ -740,6 +764,8 @@ func scanSource(sc scanner) (model.Source, error) {
 	src.EmailAlias = StringOf(alias)
 	src.Enabled = enabled == 1
 	src.LastFetchedAt = StringPtr(fetched)
+	src.ETag = StringOf(etag)
+	src.LastModified = StringOf(modified)
 	src.Config = map[string]any{}
 	if config.Valid && config.String != "" {
 		_ = json.Unmarshal([]byte(config.String), &src.Config)
@@ -751,7 +777,7 @@ func scanRow(sc scanner) (model.Item, model.Source, model.UserItemState, int, er
 	var item model.Item
 	var discussion, markdown, excerpt, meta sql.NullString
 	var source model.Source
-	var feed, alias, config, fetched sql.NullString
+	var feed, alias, config, fetched, etag, modified sql.NullString
 	var enabled, inLater int
 	var saved, read sql.NullString
 	var progress float64
@@ -761,7 +787,7 @@ func scanRow(sc scanner) (model.Item, model.Source, model.UserItemState, int, er
 		&item.Title, &item.Author, &item.PublishedAt, &item.PublishedDay, &item.OpenMode, &item.ActionURL,
 		&markdown, &item.PlainText, &excerpt, &meta, &item.CreatedAt, &item.UpdatedAt,
 		&source.ID, &source.Name, &source.SourceType, &source.Folder, &source.DefaultOpenMode, &source.DefaultQueue,
-		&feed, &alias, &config, &enabled, &fetched, &source.CreatedAt, &source.UpdatedAt,
+		&feed, &alias, &config, &enabled, &fetched, &etag, &modified, &source.CreatedAt, &source.UpdatedAt,
 		&inLater, &saved, &read, &progress, &count,
 	)
 	if err != nil {
@@ -780,6 +806,8 @@ func scanRow(sc scanner) (model.Item, model.Source, model.UserItemState, int, er
 	source.EmailAlias = StringOf(alias)
 	source.Enabled = enabled == 1
 	source.LastFetchedAt = StringPtr(fetched)
+	source.ETag = StringOf(etag)
+	source.LastModified = StringOf(modified)
 	source.Config = map[string]any{}
 	if config.Valid && config.String != "" {
 		_ = json.Unmarshal([]byte(config.String), &source.Config)
@@ -909,6 +937,13 @@ func walkText(v any, b *strings.Builder) {
 			walkText(item, b)
 		}
 	}
+}
+
+func deref(v *string) string {
+	if v == nil {
+		return ""
+	}
+	return *v
 }
 
 func nullablePtr(v *string) sql.NullString {

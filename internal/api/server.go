@@ -36,6 +36,7 @@ func New(store *db.Store, token string) http.Handler {
 	mux.HandleFunc("PATCH /v1/highlights/{id}", s.patchHighlight)
 	mux.HandleFunc("DELETE /v1/highlights/{id}", s.deleteHighlight)
 	mux.HandleFunc("GET /v1/sources", s.listSources)
+	mux.HandleFunc("POST /v1/sources/import", s.importSources)
 	mux.HandleFunc("POST /v1/sources", s.createSource)
 	mux.HandleFunc("PATCH /v1/sources/{id}", s.patchSource)
 	mux.HandleFunc("DELETE /v1/sources/{id}", s.deleteSource)
@@ -291,6 +292,50 @@ func (s *Server) deleteHighlight(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *Server) importSources(w http.ResponseWriter, r *http.Request) {
+	format := r.URL.Query().Get("format")
+	filename := ""
+	var data []byte
+	if strings.HasPrefix(r.Header.Get("Content-Type"), "multipart/form-data") {
+		if err := r.ParseMultipartForm(8 << 20); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid upload")
+			return
+		}
+		if value := r.FormValue("format"); value != "" {
+			format = value
+		}
+		file, header, err := r.FormFile("file")
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "file is required")
+			return
+		}
+		defer file.Close()
+		filename = header.Filename
+		data, err = io.ReadAll(io.LimitReader(file, 8<<20))
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid upload")
+			return
+		}
+	} else {
+		var err error
+		data, err = io.ReadAll(io.LimitReader(r.Body, 8<<20))
+		if err != nil || len(bytesTrimSpace(data)) == 0 {
+			writeError(w, http.StatusBadRequest, "empty body")
+			return
+		}
+	}
+	result, err := ingest.ImportBytes(r.Context(), s.Store, data, ingest.ImportOptions{Filename: filename, Format: format})
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
+}
+
+func bytesTrimSpace(data []byte) []byte {
+	return []byte(strings.TrimSpace(string(data)))
 }
 
 func (s *Server) listSources(w http.ResponseWriter, _ *http.Request) {

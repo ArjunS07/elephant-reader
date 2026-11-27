@@ -14,6 +14,8 @@ type Source struct {
 	Config          map[string]any `json:"config,omitempty"`
 	Enabled         bool           `json:"enabled"`
 	LastFetchedAt   *string        `json:"lastFetchedAt"`
+	ETag            string         `json:"etag,omitempty"`
+	LastModified    string         `json:"lastModified,omitempty"`
 	CreatedAt       string         `json:"createdAt"`
 	UpdatedAt       string         `json:"updatedAt"`
 }

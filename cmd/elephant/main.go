@@ -42,12 +42,30 @@ func main() {
 		if err != nil {
 			log.Fatal(err)
 		}
-		fmt.Printf("sources %d ingested %d\n", result.Sources, result.Ingested)
+		fmt.Printf("synced %d unchanged %d failed %d added %d\n", result.Synced, result.NotModified, result.Failed, result.ItemsAdded)
 		for _, item := range result.Errors {
 			fmt.Println(item)
 		}
+	case "import":
+		if len(os.Args) < 3 {
+			fmt.Fprintln(os.Stderr, "usage: elephant import <file> [youtube|opml]")
+			os.Exit(2)
+		}
+		format := ""
+		if len(os.Args) > 3 {
+			format = os.Args[3]
+		}
+		body, err := os.ReadFile(os.Args[2])
+		if err != nil {
+			log.Fatal(err)
+		}
+		result, err := ingest.ImportBytes(context.Background(), store, body, ingest.ImportOptions{Filename: os.Args[2], Format: format})
+		if err != nil {
+			log.Fatal(err)
+		}
+		fmt.Printf("added %d skipped %d total %d\n", result.Added, result.Skipped, result.Total)
 	default:
-		fmt.Fprintln(os.Stderr, "usage: elephant [serve|seed|sync]")
+		fmt.Fprintln(os.Stderr, "usage: elephant [serve|seed|sync|import]")
 		os.Exit(2)
 	}
 }

@@ -23,7 +23,14 @@ STATIC_DIR=dist go run ./cmd/elephant seed
 STATIC_DIR=dist go run ./cmd/elephant serve
 ```
 
-`seed` loads the sample library. It is idempotent: running it again refreshes sample documents and does not reset reading state already stored for those items. `sync` fetches enabled RSS, Atom, podcast, YouTube, and Hacker News sources once.
+`seed` loads the sample library. It is idempotent: running it again refreshes sample documents and does not reset reading state already stored for those items. `sync` fetches enabled RSS, Atom, podcast, YouTube, and Hacker News sources with 12 workers. Unchanged feeds return 304 and are not parsed again.
+
+```bash
+elephant import subscriptions.opml
+elephant import takeout.csv youtube
+```
+
+YouTube Takeout CSV rows become Video sources. Overcast OPML rows become podcast sources that open in Overcast. Other OPML outlines become RSS sources. A feed URL that already exists is skipped.
 
 ## Deploy on Fly.io
 

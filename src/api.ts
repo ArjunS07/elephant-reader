@@ -16,7 +16,8 @@ function authToken(): string | undefined {
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const headers = new Headers(init?.headers)
-  if (init?.body && !headers.has('Content-Type')) headers.set('Content-Type', 'application/json')
+  const form = typeof FormData !== 'undefined' && init?.body instanceof FormData
+  if (init?.body && !form && !headers.has('Content-Type')) headers.set('Content-Type', 'application/json')
   const token = authToken()
   if (token) headers.set('Authorization', `Bearer ${token}`)
   const response = await fetch(path, { ...init, headers })
@@ -86,6 +87,28 @@ export function sources(): Promise<Source[]> {
 
 export function patchSource(id: string, patch: Record<string, unknown>): Promise<Source> {
   return request(`/v1/sources/${id}`, { method: 'PATCH', body: JSON.stringify(patch) })
+}
+
+export function createSource(body: Record<string, unknown>): Promise<Source> {
+  return request('/v1/sources', { method: 'POST', body: JSON.stringify(body) })
+}
+
+export function deleteSource(id: string): Promise<void> {
+  return request(`/v1/sources/${id}`, { method: 'DELETE' })
+}
+
+export function syncSource(id: string): Promise<{ synced: number; notModified: number; failed: number; itemsAdded: number }> {
+  return request(`/v1/sources/${id}/sync`, { method: 'POST' })
+}
+
+export function syncAll(): Promise<{ synced: number; notModified: number; failed: number; itemsAdded: number }> {
+  return request('/v1/sync', { method: 'POST' })
+}
+
+export function importSources(file: File): Promise<{ added: number; skipped: number; total: number }> {
+  const body = new FormData()
+  body.append('file', file)
+  return request('/v1/sources/import', { method: 'POST', body })
 }
 
 export function ingest(body: Record<string, unknown> | { items: Record<string, unknown>[] }): Promise<{ items: Item[] }> {

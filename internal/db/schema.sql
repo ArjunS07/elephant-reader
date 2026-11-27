@@ -10,6 +10,8 @@ CREATE TABLE IF NOT EXISTS sources (
   config_json TEXT NOT NULL DEFAULT '{}',
   enabled INTEGER NOT NULL DEFAULT 1 CHECK (enabled IN (0, 1)),
   last_fetched_at TEXT,
+  etag TEXT,
+  last_modified TEXT,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );

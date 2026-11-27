@@ -302,6 +302,11 @@ input[type="range"]::-moz-range-thumb {
   color: var(--fg);
 }
 
+.filters button .count {
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
 .daynav {
   position: relative;
   display: flex;
@@ -606,7 +611,63 @@ input[type="range"]::-moz-range-thumb {
 }
 
 .sources {
-  padding-top: 0.4rem;
+  padding-top: 0.15rem;
+}
+
+.source-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.75rem 1.1rem;
+  padding: 0.15rem 0 0.35rem;
+}
+
+.source-toolbar .search {
+  flex: 1 1 12rem;
+  min-width: 0;
+  width: auto;
+}
+
+.source-toolbar-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.85rem;
+  margin-left: auto;
+}
+
+.add-source input {
+  width: 100%;
+  border: 0;
+  border-bottom: 1px solid var(--border);
+  background: transparent;
+  padding: 0.55rem 0;
+  outline: none;
+  font: inherit;
+  color: inherit;
+}
+
+.add-source input:focus {
+  border-bottom-color: var(--fg);
+}
+
+.add-source .filter-names {
+  padding: 0.55rem 0 0.15rem;
+}
+
+.add-source .filter-names button {
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.add-source .filter-names button[aria-pressed="true"] {
+  color: var(--fg);
+}
+
+.add-source-save {
+  display: flex;
+  justify-content: flex-end;
+  padding: 0.35rem 0 0.2rem;
 }
 
 .group {
@@ -623,25 +684,59 @@ input[type="range"]::-moz-range-thumb {
   color: var(--muted);
 }
 
+.source-list {
+  padding-top: 0.35rem;
+}
+
 .source {
   display: flex;
   justify-content: space-between;
-  gap: 0.75rem;
-  align-items: center;
-  padding: 0.55rem 0;
-  border-top: 1px solid var(--border);
+  gap: 0.85rem;
+  align-items: baseline;
+  padding: 0.42rem 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.source-copy {
+  display: flex;
+  gap: 0.65rem;
+  min-width: 0;
+  align-items: baseline;
 }
 
 .source-name {
-  font-size: 15px;
+  font-family: Inter, system-ui, sans-serif;
+  font-size: 14px;
   color: var(--fg);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.source-domain {
+  color: var(--muted);
+  font-family: Inter, system-ui, sans-serif;
+  font-size: 13px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.source[data-paused="true"] .source-name,
+.source[data-paused="true"] .source-domain {
+  color: var(--muted);
 }
 
 .source-actions {
   display: flex;
-  align-items: center;
-  gap: 0.85rem;
+  align-items: baseline;
+  gap: 0.8rem;
   flex: none;
+  white-space: nowrap;
+}
+
+.text-btn:disabled {
+  opacity: 0.45;
 }
 
 .text-btn,

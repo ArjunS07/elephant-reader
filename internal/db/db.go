@@ -51,7 +51,35 @@ func (s *Store) Migrate() error {
 	if _, err := s.SQL.Exec(string(body)); err != nil {
 		return fmt.Errorf("migrate: %w", err)
 	}
-	return nil
+	if err := s.addColumn("sources", "etag", "TEXT"); err != nil {
+		return err
+	}
+	return s.addColumn("sources", "last_modified", "TEXT")
+}
+
+func (s *Store) addColumn(table, column, decl string) error {
+	rows, err := s.SQL.Query(`PRAGMA table_info(` + table + `)`)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var cid int
+		var name, ctype string
+		var notNull, pk int
+		var dflt sql.NullString
+		if err := rows.Scan(&cid, &name, &ctype, &notNull, &dflt, &pk); err != nil {
+			return err
+		}
+		if strings.EqualFold(name, column) {
+			return nil
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	_, err = s.SQL.Exec(`ALTER TABLE ` + table + ` ADD COLUMN ` + column + ` ` + decl)
+	return err
 }
 
 func (s *Store) withTx(fn func(*sql.Tx) error) error {

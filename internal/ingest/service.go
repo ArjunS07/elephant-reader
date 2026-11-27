@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 
 	"elephant/internal/db"
@@ -25,15 +26,19 @@ type Service struct {
 func New(store *db.Store) *Service {
 	return &Service{
 		Store: store,
-		HTTP:  &http.Client{Timeout: 20 * time.Second},
+		HTTP:  &http.Client{Timeout: 15 * time.Second},
 	}
 }
 
 type SyncResult struct {
-	Sources  int      `json:"sources"`
-	Ingested int      `json:"ingested"`
-	Errors   []string `json:"errors"`
+	Synced      int      `json:"synced"`
+	NotModified int      `json:"notModified"`
+	Failed      int      `json:"failed"`
+	ItemsAdded  int      `json:"itemsAdded"`
+	Errors      []string `json:"errors"`
 }
+
+const syncWorkers = 12
 
 func (s *Service) Ingest(ctx context.Context, inputs []model.IngestItem) ([]model.IngestResult, error) {
 	if err := ctx.Err(); err != nil {
@@ -149,23 +154,49 @@ func (s *Service) resolveSource(id string) (model.Source, error) {
 	return s.Store.EnsureManualSource()
 }
 
-func (s *Service) SyncSource(ctx context.Context, source model.Source) (int, error) {
-	items, err := s.fetchSource(ctx, source)
+func (s *Service) SyncSource(ctx context.Context, source model.Source) (int, bool, error) {
+	items, fresh, notModified, err := s.fetchSource(ctx, source)
 	if err != nil {
-		return 0, err
+		return 0, false, err
+	}
+	now := db.Now()
+	patch := db.SourcePatch{TouchFetched: true, LastFetchedAt: &now}
+	if !notModified {
+		etag := fresh.ETag
+		if etag == "" {
+			etag = source.ETag
+		}
+		modified := fresh.LastModified
+		if modified == "" {
+			modified = source.LastModified
+		}
+		patch.TouchValidators = true
+		patch.ETag = &etag
+		patch.LastModified = &modified
+	}
+	if notModified {
+		if _, err := s.Store.PatchSource(source.ID, patch); err != nil {
+			return 0, true, err
+		}
+		return 0, true, nil
 	}
 	for i := range items {
 		items[i].SourceID = source.ID
 	}
 	results, err := s.Ingest(ctx, items)
 	if err != nil {
-		return 0, err
+		return 0, false, err
 	}
-	now := db.Now()
-	if _, err := s.Store.PatchSource(source.ID, db.SourcePatch{TouchFetched: true, LastFetchedAt: &now}); err != nil {
-		return len(results), err
+	if _, err := s.Store.PatchSource(source.ID, patch); err != nil {
+		return 0, false, err
 	}
-	return len(results), nil
+	added := 0
+	for _, result := range results {
+		if result.Created {
+			added++
+		}
+	}
+	return added, false, nil
 }
 
 func (s *Service) Sync(ctx context.Context, sourceID string) (SyncResult, error) {
@@ -187,33 +218,67 @@ func (s *Service) Sync(ctx context.Context, sourceID string) (SyncResult, error)
 			}
 		}
 	}
-	result := SyncResult{Sources: len(sources), Errors: []string{}}
-	for _, source := range sources {
-		if !fetchable(source) {
-			continue
-		}
-		n, err := s.SyncSource(ctx, source)
-		if err != nil {
-			result.Errors = append(result.Errors, source.Name+": "+err.Error())
-			continue
-		}
-		result.Ingested += n
+	result := SyncResult{Errors: []string{}}
+	if len(sources) == 0 {
+		return result, nil
 	}
+	jobs := make(chan model.Source)
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+	workers := syncWorkers
+	if workers > len(sources) {
+		workers = len(sources)
+	}
+	for i := 0; i < workers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for source := range jobs {
+				if !fetchable(source) {
+					continue
+				}
+				jobCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+				added, unchanged, err := s.SyncSource(jobCtx, source)
+				cancel()
+				mu.Lock()
+				if err != nil {
+					result.Failed++
+					result.Errors = append(result.Errors, source.Name+": "+err.Error())
+				} else if unchanged {
+					result.NotModified++
+				} else {
+					result.Synced++
+					result.ItemsAdded += added
+				}
+				mu.Unlock()
+			}
+		}()
+	}
+	for _, source := range sources {
+		jobs <- source
+	}
+	close(jobs)
+	wg.Wait()
 	return result, nil
 }
 
-func (s *Service) fetchSource(ctx context.Context, source model.Source) ([]model.IngestItem, error) {
+type feedFetch struct {
+	ETag         string
+	LastModified string
+}
+
+func (s *Service) fetchSource(ctx context.Context, source model.Source) ([]model.IngestItem, feedFetch, bool, error) {
 	switch source.SourceType {
 	case "hn":
 		min := db.MinPoints(source.Config)
 		endpoint := "https://hn.algolia.com/api/v1/search_by_date?tags=story&hitsPerPage=40&numericFilters=" + url.QueryEscape(fmt.Sprintf("points>=%d", min))
-		body, err := s.get(ctx, endpoint)
-		if err != nil {
-			return nil, err
+		body, fresh, notModified, err := s.get(ctx, endpoint, source.ETag, source.LastModified)
+		if err != nil || notModified {
+			return nil, fresh, notModified, err
 		}
 		items, err := ParseHN(body)
 		if err != nil {
-			return nil, err
+			return nil, fresh, false, err
 		}
 		var kept []model.IngestItem
 		for _, item := range items {
@@ -225,33 +290,23 @@ func (s *Service) fetchSource(ctx context.Context, source model.Source) ([]model
 				kept = append(kept, item)
 			}
 		}
-		return kept, nil
-	case "rss", "podcast", "youtube":
-		if strings.TrimSpace(source.FeedURL) == "" {
-			return nil, fmt.Errorf("missing feedUrl")
-		}
-		body, err := s.get(ctx, source.FeedURL)
-		if err != nil {
-			return nil, err
-		}
-		entries, err := ParseFeed(body)
-		if err != nil {
-			return nil, err
-		}
-		return EntriesToItems(source, entries), nil
+		return kept, fresh, false, nil
 	default:
 		if strings.TrimSpace(source.FeedURL) == "" {
-			return []model.IngestItem{}, nil
+			if source.SourceType == "rss" || source.SourceType == "podcast" || source.SourceType == "youtube" {
+				return nil, feedFetch{}, false, fmt.Errorf("missing feedUrl")
+			}
+			return []model.IngestItem{}, feedFetch{}, false, nil
 		}
-		body, err := s.get(ctx, source.FeedURL)
-		if err != nil {
-			return nil, err
+		body, fresh, notModified, err := s.get(ctx, source.FeedURL, source.ETag, source.LastModified)
+		if err != nil || notModified {
+			return nil, fresh, notModified, err
 		}
 		entries, err := ParseFeed(body)
 		if err != nil {
-			return nil, err
+			return nil, fresh, false, err
 		}
-		return EntriesToItems(source, entries), nil
+		return EntriesToItems(source, entries), fresh, false, nil
 	}
 }
 
@@ -315,29 +370,39 @@ func (s *Service) InboundEmail(to, from, subject, htmlBody, text, receivedAt str
 	})
 }
 
-func (s *Service) get(ctx context.Context, endpoint string) ([]byte, error) {
+func (s *Service) get(ctx context.Context, endpoint, etag, modified string) ([]byte, feedFetch, bool, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
-		return nil, err
+		return nil, feedFetch{}, false, err
 	}
 	req.Header.Set("User-Agent", "elephant/1.0")
+	if strings.TrimSpace(etag) != "" {
+		req.Header.Set("If-None-Match", etag)
+	}
+	if strings.TrimSpace(modified) != "" {
+		req.Header.Set("If-Modified-Since", modified)
+	}
 	client := s.HTTP
 	if client == nil {
 		client = http.DefaultClient
 	}
 	res, err := client.Do(req)
 	if err != nil {
-		return nil, err
+		return nil, feedFetch{}, false, err
 	}
 	defer res.Body.Close()
+	fresh := feedFetch{ETag: res.Header.Get("ETag"), LastModified: res.Header.Get("Last-Modified")}
+	if res.StatusCode == http.StatusNotModified {
+		return nil, fresh, true, nil
+	}
 	body, err := io.ReadAll(io.LimitReader(res.Body, 8<<20))
 	if err != nil {
-		return nil, err
+		return nil, fresh, false, err
 	}
 	if res.StatusCode < 200 || res.StatusCode >= 300 {
-		return nil, fmt.Errorf("fetch %s: %s", endpoint, res.Status)
+		return nil, fresh, false, fmt.Errorf("fetch %s: %s", endpoint, res.Status)
 	}
-	return body, nil
+	return body, fresh, false, nil
 }
 
 func fetchable(source model.Source) bool {

@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -375,15 +377,82 @@ func TestSyncRSS(t *testing.T) {
 	res.Body.Close()
 	res = do(t, server, http.MethodPost, "/v1/sources/src_harbor/sync", "", nil)
 	var synced struct {
-		Ingested int      `json:"ingested"`
-		Errors   []string `json:"errors"`
+		ItemsAdded int      `json:"itemsAdded"`
+		Failed     int      `json:"failed"`
+		Errors     []string `json:"errors"`
 	}
 	decode(t, res, &synced)
-	if res.StatusCode != http.StatusOK || synced.Ingested != 1 || len(synced.Errors) != 0 {
+	if res.StatusCode != http.StatusOK || synced.ItemsAdded != 1 || synced.Failed != 0 || len(synced.Errors) != 0 {
 		t.Fatalf("sync %+v status %d", synced, res.StatusCode)
 	}
 	rows, err := store.DayItems("2026-11-24", "RSS", "")
 	if err != nil || len(rows) != 1 || rows[0].Item.Title != "Latency budget" {
 		t.Fatalf("synced %+v %v", rows, err)
+	}
+}
+
+func TestConcurrentSyncNotModified(t *testing.T) {
+	var inflight atomic.Int32
+	var maxInflight atomic.Int32
+	feed := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		current := inflight.Add(1)
+		for {
+			seen := maxInflight.Load()
+			if current <= seen || maxInflight.CompareAndSwap(seen, current) {
+				break
+			}
+		}
+		time.Sleep(40 * time.Millisecond)
+		inflight.Add(-1)
+		if strings.HasSuffix(r.URL.Path, "/dead") {
+			http.Error(w, "nope", http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("ETag", `"feed"`)
+		if r.Header.Get("If-None-Match") == `"feed"` {
+			w.WriteHeader(http.StatusNotModified)
+			return
+		}
+		_, _ = w.Write([]byte(`<?xml version="1.0"?><rss version="2.0"><channel><item>
+			<title>` + r.URL.Path + `</title><link>https://example.com` + r.URL.Path + `</link>
+			<guid>` + r.URL.Path + `</guid>
+			<pubDate>Tue, 24 Nov 2026 18:00:00 +0000</pubDate>
+			<description>Hello</description>
+		</item></channel></rss>`))
+	}))
+	defer feed.Close()
+	server, _ := newServer(t, "")
+	defer server.Close()
+	for _, id := range []string{"a", "b", "c", "dead"} {
+		path := "/" + id
+		if id == "dead" {
+			path = "/dead"
+		}
+		res := do(t, server, http.MethodPost, "/v1/sources", "", map[string]any{
+			"id": "src_" + id, "name": id, "sourceType": "rss", "folder": "Blogs", "feedUrl": feed.URL + path,
+		})
+		res.Body.Close()
+	}
+	res := do(t, server, http.MethodPost, "/v1/sync", "", nil)
+	var first struct {
+		Synced      int `json:"synced"`
+		NotModified int `json:"notModified"`
+		Failed      int `json:"failed"`
+		ItemsAdded  int `json:"itemsAdded"`
+	}
+	decode(t, res, &first)
+	if first.Synced != 3 || first.Failed != 1 || first.ItemsAdded != 3 || maxInflight.Load() < 2 {
+		t.Fatalf("first %+v inflight %d", first, maxInflight.Load())
+	}
+	res = do(t, server, http.MethodPost, "/v1/sync", "", nil)
+	var second struct {
+		Synced      int `json:"synced"`
+		NotModified int `json:"notModified"`
+		Failed      int `json:"failed"`
+		ItemsAdded  int `json:"itemsAdded"`
+	}
+	decode(t, res, &second)
+	if second.NotModified != 3 || second.Failed != 1 || second.ItemsAdded != 0 {
+		t.Fatalf("second %+v", second)
 	}
 }
