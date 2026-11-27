@@ -6,7 +6,7 @@ import { ItemList } from '../components/ItemList.tsx'
 import { isDayKey, openAction } from '../lib/format.ts'
 import { feedFilterNames } from '../lib/folders.ts'
 import { useHotkeys } from '../lib/hotkeys.ts'
-import { useActions, useLibrary } from '../lib/hooks.ts'
+import { useActions, useLibrary, useRefreshSources } from '../lib/hooks.ts'
 import type { FeedResponse, RowModel } from '../types.ts'
 
 function asFilter(value: string | null): string {
@@ -59,6 +59,7 @@ export function FeedView() {
   }, [dayParam, filter, sourceId, navigate, query])
 
   const rows = (data?.items ?? []).map((row) => ({ ...row, state: stateFor(row.item.id, row.state) }))
+  useRefreshSources(data?.items)
   useEffect(() => {
     if (data) rememberStates(data.items.map((row) => [row.item.id, row.state]))
   }, [data, rememberStates])
@@ -116,7 +117,7 @@ export function FeedView() {
     },
   })
 
-  const filters = feedFilterNames(sources, rows.map((row) => row.source))
+  const filters = feedFilterNames(sources)
   const shown = filter !== 'All' && !filters.includes(filter) ? [filters[0] ?? 'All', filter, ...filters.slice(1)] : filters
   const navReady = Boolean(data && data.day === day)
 
