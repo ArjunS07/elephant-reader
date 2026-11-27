@@ -18,7 +18,7 @@ function isYoutubeRow(row: RowModel): boolean {
 
 function listExcerpt(row: RowModel, from: ItemListProps['from']): string | null {
   if (from === 'read' || isYoutubeRow(row)) return null
-  const excerpt = row.item.excerpt?.trim() ?? ''
+  const excerpt = (row.item.excerpt ?? '').trim().replace(/^abstract\s*:\s*/i, '').trim()
   if (!excerpt || excerpt === row.item.title.trim()) return null
   return excerpt
 }
