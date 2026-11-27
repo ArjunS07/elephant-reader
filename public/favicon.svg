@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" fill="none">
+  <style>
+    .ink { stroke: #1f1e1c; }
+    .eye { fill: #1f1e1c; }
+    @media (prefers-color-scheme: dark) {
+      .ink { stroke: #f4efe2; }
+      .eye { fill: #f4efe2; }
+    }
+  </style>
+  <g class="ink" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M5 22.44V16.54C5 12.24 8.22 9.56 13.05 9.56H17.34C20.88 9.56 23.24 11.92 23.24 15.14V19.76C23.24 21.58 24.32 22.44 25.71 22.44C26.46 22.44 27 21.9 27 21.15" />
+    <path d="M5 22.44H9.29V18.68H14.12V22.44H18.41V17.61" />
+    <path d="M13.59 13.32C11.65 13.32 10.9 14.93 11.22 16.86C11.55 18.15 12.83 18.47 14.12 17.61" />
+  </g>
+  <circle class="eye" cx="19.17" cy="14.07" r="1.35" />
+</svg>
