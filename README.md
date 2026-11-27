@@ -25,6 +25,27 @@ STATIC_DIR=dist go run ./cmd/elephant serve
 
 `seed` loads the sample library. It is idempotent: running it again refreshes sample documents and does not reset reading state already stored for those items. `sync` fetches enabled RSS, Atom, podcast, YouTube, and Hacker News sources once.
 
+## Deploy on Fly.io
+
+The app is one shared-cpu-1x Machine with 256 MB of RAM in `lax`, a 1 GB volume at `/data`, and machines that stop when idle (`min_machines_running = 0`). That stays inside the $5/mo Free allowance. Change `app` in `fly.toml` if the name `elephant` is already taken. Deploy with a single Machine so the SQLite file on `elephant_data` is not split across hosts:
+
+```bash
+fly launch --no-deploy
+fly secrets set ELEPHANT_API_TOKEN=...
+fly deploy --ha=false
+```
+
+`GET /v1/health` is the HTTP check and stays open when the token is set. Everything else under `/v1` requires the bearer token.
+
+There is no second worker. Seed and feed sync run on the same Machine, against the volume:
+
+```bash
+fly ssh console -C "/app/elephant seed"
+fly ssh console -C "/app/elephant sync"
+```
+
+`sync` is the daily pass for RSS, Atom, podcast, YouTube, and Hacker News. Run it over SSH when you want a refresh. An always-on second process would keep the Machine from sleeping.
+
 ```bash
 go test ./...
 go build ./...

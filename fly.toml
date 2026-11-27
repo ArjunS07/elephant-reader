@@ -1,0 +1,39 @@
+# One Machine only. SQLite lives on the volume, and a second Machine would
+# split that file and spend the Free plan allowance twice:
+#   fly deploy --ha=false
+# Set the bearer token outside the image:
+#   fly secrets set ELEPHANT_API_TOKEN=...
+
+app = "elephant"
+primary_region = "lax"
+
+[build]
+
+[env]
+  PORT = "8080"
+  STATIC_DIR = "/app/dist"
+  DATABASE_PATH = "/data/elephant.db"
+  ELEPHANT_TIMEZONE = "America/Los_Angeles"
+
+[mounts]
+  source = "elephant_data"
+  destination = "/data"
+  initial_size = "1gb"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  min_machines_running = 0
+
+  [[http_service.checks]]
+    grace_period = "10s"
+    interval = "30s"
+    method = "GET"
+    timeout = "5s"
+    path = "/v1/health"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "256mb"

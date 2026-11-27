@@ -1,0 +1,14 @@
+.git
+.github
+.idea
+.vscode
+node_modules
+dist
+data
+*.db*
+/elephant
+*.log
+coverage
+tmp
+*.local
+.DS_Store
