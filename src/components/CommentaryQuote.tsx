@@ -1,4 +1,4 @@
-import type { DiscussionQuote, QuoteReply } from '../types/model.ts'
+import type { DiscussionQuote, QuoteReply } from '../types.ts'
 import { kindLabel, speakerAffiliation } from '../lib/quotes.ts'
 
 function Reply({ reply }: { reply: QuoteReply }) {

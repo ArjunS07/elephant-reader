@@ -2,58 +2,55 @@ import { useState, type FormEvent } from 'react'
 import { Link } from 'react-router-dom'
 import { IconBookmark, IconCheck } from '../components/Icons.tsx'
 import { useActions, useLibrary } from '../lib/hooks.ts'
-import type { SourceType } from '../types/model.ts'
+import type { SourceType } from '../types.ts'
 
-const ORDER: SourceType[] = [
-  'ml_digest_paper',
-  'ml_digest_news',
-  'rss',
-  'newsletter',
-  'hacker_news',
-  'youtube',
-  'podcast',
-  'web_snapshot',
-  'chrome_ext',
-]
+const ORDER: SourceType[] = ['papers', 'rss', 'newsletter', 'hn', 'youtube', 'podcast', 'snapshot', 'manual']
 
 const LABEL: Record<SourceType, string> = {
-  ml_digest_paper: 'Papers',
-  ml_digest_news: 'News',
+  papers: 'Papers',
   rss: 'RSS',
   newsletter: 'Newsletters',
-  hacker_news: 'HN',
+  hn: 'HN',
   youtube: 'Video',
   podcast: 'Podcasts',
-  web_snapshot: 'Snapshots',
-  chrome_ext: 'Extension',
+  snapshot: 'Snapshots',
+  manual: 'Manual',
 }
 
 export function SourcesView() {
-  const { sources } = useLibrary()
-  const { toggleSource, generateAlias, capture, resetDemo } = useActions()
+  const { sources, ready } = useLibrary()
+  const { toggleSource, generateAlias, capture } = useActions()
   const [url, setUrl] = useState('')
   const [title, setTitle] = useState('')
   const [invalid, setInvalid] = useState(false)
+  const [error, setError] = useState<string | null>(null)
 
-  const submit = (event: FormEvent<HTMLFormElement>) => {
+  const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
     const submitter = (event.nativeEvent as SubmitEvent).submitter
     const mode = submitter instanceof HTMLButtonElement && submitter.value === 'read' ? 'read' : 'later'
-    const ok = capture({ url, title, mode })
-    if (!ok) {
-      setInvalid(true)
-      return
+    try {
+      const ok = await capture({ url, title, mode })
+      if (!ok) {
+        setInvalid(true)
+        return
+      }
+      setUrl('')
+      setTitle('')
+      setInvalid(false)
+      setError(null)
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'Could not save')
     }
-    setUrl('')
-    setTitle('')
-    setInvalid(false)
   }
 
   return (
     <main className="sheet sources">
+      {!ready && !sources.length ? <p className="meta">Loading</p> : null}
+      {error ? <p className="meta">{error}</p> : null}
       {ORDER.map((type) => {
         const group = sources.filter((source) => source.sourceType === type)
-        if (!group.length && type !== 'chrome_ext') return null
+        if (!group.length && type !== 'manual') return null
         return (
           <section key={type} className="group">
             <h2>{LABEL[type]}</h2>
@@ -69,7 +66,7 @@ export function SourcesView() {
                   </div>
                   <div className="source-actions">
                     {source.sourceType === 'newsletter' ? (
-                      <button type="button" className="text-btn" title="Generate newsletter alias" onClick={() => generateAlias(source.id)}>
+                      <button type="button" className="text-btn" title="Generate newsletter alias" onClick={() => void generateAlias(source.id)}>
                         Alias
                       </button>
                     ) : null}
@@ -79,7 +76,7 @@ export function SourcesView() {
                       role="switch"
                       aria-checked={source.enabled}
                       aria-label={`${source.name} enabled`}
-                      onClick={() => toggleSource(source.id)}
+                      onClick={() => void toggleSource(source.id)}
                     >
                       <span />
                     </button>
@@ -87,8 +84,8 @@ export function SourcesView() {
                 </div>
               )
             })}
-            {type === 'chrome_ext' ? (
-              <form className="capture" onSubmit={submit}>
+            {type === 'manual' ? (
+              <form className="capture" onSubmit={(event) => void submit(event)}>
                 <input
                   value={url}
                   onChange={(event) => {
@@ -122,9 +119,6 @@ export function SourcesView() {
           </section>
         )
       })}
-      <button type="button" className="reset" onClick={resetDemo}>
-        Reset demo data
-      </button>
     </main>
   )
 }

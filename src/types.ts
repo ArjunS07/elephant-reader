@@ -1,22 +1,6 @@
-export type SourceType =
-  | 'rss'
-  | 'newsletter'
-  | 'youtube'
-  | 'ml_digest_paper'
-  | 'ml_digest_news'
-  | 'podcast'
-  | 'hacker_news'
-  | 'web_snapshot'
-  | 'chrome_ext'
+export type SourceType = 'rss' | 'newsletter' | 'youtube' | 'hn' | 'papers' | 'podcast' | 'snapshot' | 'manual'
 
-export type Folder =
-  | 'Papers'
-  | 'Blogs'
-  | 'Newsletters'
-  | 'HN'
-  | 'Podcasts'
-  | 'Video'
-  | 'Briefings'
+export type Folder = 'Papers' | 'Blogs' | 'Newsletters' | 'HN' | 'Podcasts' | 'Video' | 'Briefings'
 
 export type OpenMode = 'reader' | 'external' | 'deeplink'
 
@@ -24,7 +8,7 @@ export type ThemeName = 'light' | 'warm' | 'dark'
 
 export type FontFamily = 'inter' | 'lora' | 'newsreader'
 
-export type ColumnWidth = 'narrow' | 'default' | 'wide'
+export type ColumnWidth = 'cozy' | 'standard' | 'wide'
 
 export type ColumnAlign = 'left' | 'center'
 
@@ -32,12 +16,16 @@ export interface Source {
   id: string
   name: string
   sourceType: SourceType
-  folder: Folder
+  folder: Folder | string
   defaultOpenMode: OpenMode
-  defaultQueue: 'firehose' | 'later'
+  defaultQueue: 'feed' | 'later'
   feedUrl?: string
   emailAlias?: string
+  config?: Record<string, unknown>
   enabled: boolean
+  lastFetchedAt?: string | null
+  createdAt?: string
+  updatedAt?: string
 }
 
 export interface PaperLink {
@@ -72,7 +60,7 @@ export interface PaperMetadata {
   tractionNote?: string
   abstract: string
   links: PaperLink[]
-  discussionQuotes: DiscussionQuote[]
+  discussionQuotes?: DiscussionQuote[]
 }
 
 export interface HnMetadata {
@@ -95,14 +83,11 @@ export interface YoutubeMetadata {
 
 export interface GenericMetadata {
   kind: 'generic'
+  tractionNote?: string
+  discussionQuotes?: DiscussionQuote[]
 }
 
-export type ItemMetadata =
-  | PaperMetadata
-  | HnMetadata
-  | PodcastMetadata
-  | YoutubeMetadata
-  | GenericMetadata
+export type ItemMetadata = PaperMetadata | HnMetadata | PodcastMetadata | YoutubeMetadata | GenericMetadata
 
 export interface Item {
   id: string
@@ -113,13 +98,17 @@ export interface Item {
   title: string
   author: string
   publishedAt: string
+  publishedDay: string
   openMode: OpenMode
   actionUrl: string
   contentMarkdown?: string
   plainText: string
+  excerpt?: string
   tractionNote?: string
   discussionQuotes?: DiscussionQuote[]
   metadata: ItemMetadata
+  createdAt?: string
+  updatedAt?: string
 }
 
 export interface UserItemState {
@@ -147,17 +136,22 @@ export interface UserPreferences {
   lineHeight: number
   columnWidth: ColumnWidth
   align: ColumnAlign
+  updatedAt?: string
 }
 
-export const FOLDERS = [
-  'All',
-  'Papers',
-  'Blogs',
-  'Newsletters',
-  'HN',
-  'Podcasts',
-  'Video',
-  'Briefings',
-] as const
+export interface RowModel {
+  item: Item
+  source: Source
+  state: UserItemState
+  highlightCount: number
+}
 
-export type FolderFilter = (typeof FOLDERS)[number]
+export interface FeedResponse {
+  day: string
+  prevDay: string | null
+  nextDay: string | null
+  earliest: string | null
+  latest: string | null
+  counts: Record<string, number>
+  items: RowModel[]
+}

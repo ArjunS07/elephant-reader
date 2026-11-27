@@ -1,4 +1,4 @@
-import type { Highlight } from '../types/model.ts'
+import type { Highlight } from '../types.ts'
 
 interface IndexedText {
   node: Text

@@ -1,11 +1,10 @@
-import type { ColumnAlign, ColumnWidth, FontFamily, ThemeName, UserPreferences } from '../types/model.ts'
+import type { ColumnAlign, ColumnWidth, FontFamily, ThemeName, UserPreferences } from '../types.ts'
 
-export const PREFS_KEY = 'field.prefs'
-export const DATA_KEY = 'field.data.v1'
+export const PREFS_KEY = 'elephant.prefs'
 
 export const COLUMN_WIDTH: Record<ColumnWidth, string> = {
-  narrow: '600px',
-  default: '672px',
+  cozy: '600px',
+  standard: '672px',
   wide: '760px',
 }
 
@@ -14,7 +13,7 @@ export const defaultPrefs: UserPreferences = {
   fontFamily: 'inter',
   fontSize: 18,
   lineHeight: 1.65,
-  columnWidth: 'default',
+  columnWidth: 'standard',
   align: 'left',
 }
 
@@ -27,27 +26,23 @@ function numberOr(value: unknown, fallback: number): number {
   return Number.isFinite(n) ? n : fallback
 }
 
+function widthOf(value: unknown): ColumnWidth {
+  if (value === 'cozy' || value === 'narrow') return 'cozy'
+  if (value === 'wide') return 'wide'
+  return 'standard'
+}
+
 export function sanitizePrefs(input: Partial<UserPreferences> | null | undefined): UserPreferences {
   const theme: ThemeName =
-    input?.theme === 'warm' || input?.theme === 'dark' || input?.theme === 'light'
-      ? input.theme
-      : defaultPrefs.theme
+    input?.theme === 'warm' || input?.theme === 'dark' || input?.theme === 'light' ? input.theme : defaultPrefs.theme
   const fontFamily: FontFamily =
     input?.fontFamily === 'lora' || input?.fontFamily === 'newsreader' || input?.fontFamily === 'inter'
       ? input.fontFamily
       : defaultPrefs.fontFamily
-  const columnWidth: ColumnWidth =
-    input?.columnWidth === 'narrow' || input?.columnWidth === 'wide' || input?.columnWidth === 'default'
-      ? input.columnWidth
-      : defaultPrefs.columnWidth
   const align: ColumnAlign = input?.align === 'center' || input?.align === 'left' ? input.align : defaultPrefs.align
   const fontSize = clamp(Math.round(numberOr(input?.fontSize, defaultPrefs.fontSize)), 15, 20)
-  const lineHeight = clamp(
-    Math.round(numberOr(input?.lineHeight, defaultPrefs.lineHeight) * 20) / 20,
-    1.5,
-    1.85,
-  )
-  return { theme, fontFamily, fontSize, lineHeight, columnWidth, align }
+  const lineHeight = clamp(Math.round(numberOr(input?.lineHeight, defaultPrefs.lineHeight) * 20) / 20, 1.5, 1.85)
+  return { theme, fontFamily, fontSize, lineHeight, columnWidth: widthOf(input?.columnWidth), align }
 }
 
 export function applyPrefs(prefs: UserPreferences) {
@@ -67,7 +62,7 @@ export function applyPrefs(prefs: UserPreferences) {
 
 export function loadPrefs(): UserPreferences {
   try {
-    const raw = localStorage.getItem(PREFS_KEY)
+    const raw = localStorage.getItem(PREFS_KEY) ?? localStorage.getItem('field.prefs')
     if (!raw) return defaultPrefs
     return sanitizePrefs(JSON.parse(raw) as Partial<UserPreferences>)
   } catch {

@@ -1,4 +1,4 @@
-import type { Item } from '../types/model.ts'
+import type { Item } from '../types.ts'
 import { quotesOf, tractionOf } from './quotes.ts'
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
@@ -91,15 +91,4 @@ export function auxiliaryParts(item: Item, extras: string[]): string[] {
 export function readPercent(progress: number): string | null {
   if (progress <= 0.01) return null
   return `${Math.round(progress * 100)}%`
-}
-
-export function makeAlias(name: string, taken: string[]): string {
-  const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'letter'
-  let alias = `nl-${slug}@read.local`
-  let n = 2
-  while (taken.includes(alias)) {
-    alias = `nl-${slug}-${n}@read.local`
-    n += 1
-  }
-  return alias
 }

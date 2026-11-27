@@ -1,13 +1,12 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
+import { feed } from '../api.ts'
 import { DayNav } from '../components/DayNav.tsx'
 import { ItemList } from '../components/ItemList.tsx'
-import { dayKey, isDayKey } from '../lib/format.ts'
-import { openAction } from '../lib/format.ts'
+import { isDayKey, openAction } from '../lib/format.ts'
 import { useHotkeys } from '../lib/hotkeys.ts'
-import { rowsFor, type RowModel } from '../lib/select.ts'
 import { useActions, useLibrary } from '../lib/hooks.ts'
-import type { Source } from '../types/model.ts'
+import type { FeedResponse, RowModel } from '../types.ts'
 
 const FILTERS = ['All', 'Papers', 'RSS', 'Newsletters', 'HN', 'Podcasts', 'Video', 'Briefings'] as const
 type FeedFilter = (typeof FILTERS)[number]
@@ -16,42 +15,54 @@ function asFilter(value: string | null): FeedFilter {
   return FILTERS.includes(value as FeedFilter) ? (value as FeedFilter) : 'All'
 }
 
-function matchesFilter(source: Source, filter: FeedFilter, sourceId: string | null): boolean {
-  if (sourceId) return source.id === sourceId
-  if (filter === 'All') return true
-  if (filter === 'RSS') return source.sourceType === 'rss'
-  return source.folder === filter
-}
-
 export function FeedView() {
-  const library = useLibrary()
+  const { sources, stateFor, rememberStates } = useLibrary()
   const { markRead, saveLater, removeLater } = useActions()
   const navigate = useNavigate()
   const { day: dayParam } = useParams()
   const [params, setParams] = useSearchParams()
   const filter = asFilter(params.get('folder'))
   const sourceId = params.get('source')
-  const rows = rowsFor(library, 'feed')
-  const scoped = useMemo(
-    () => rows.filter((row) => matchesFilter(row.source, filter, sourceId)),
-    [rows, filter, sourceId],
-  )
-  const counts = useMemo(() => {
-    const map: Record<string, number> = {}
-    for (const row of scoped) {
-      const key = dayKey(row.item.publishedAt)
-      if (!key) continue
-      map[key] = (map[key] ?? 0) + 1
-    }
-    return map
-  }, [scoped])
-  const days = Object.keys(counts).sort()
-  const latest = days.at(-1) ?? ''
-  const earliest = days[0] ?? latest
-  const day = isDayKey(dayParam) ? dayParam : latest
-  const visible = scoped.filter((row) => dayKey(row.item.publishedAt) === day)
+  const query = params.toString()
+  const [data, setData] = useState<FeedResponse | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const [loading, setLoading] = useState(true)
   const [cursor, setCursor] = useState<string | null>(null)
-  const activeSource = sourceId ? library.sources.find((source) => source.id === sourceId) : undefined
+
+  useEffect(() => {
+    let stop = false
+    setLoading(true)
+    setError(null)
+    feed({
+      day: isDayKey(dayParam) ? dayParam : undefined,
+      folder: filter,
+      sourceId: sourceId ?? undefined,
+    })
+      .then((next) => {
+        if (stop) return
+        setData(next)
+        setLoading(false)
+        if (next.day && next.day !== dayParam) {
+          navigate(query ? `/feed/${next.day}?${query}` : `/feed/${next.day}`, { replace: true })
+        }
+      })
+      .catch((reason: unknown) => {
+        if (stop) return
+        setLoading(false)
+        setError(reason instanceof Error ? reason.message : 'Could not load')
+      })
+    return () => {
+      stop = true
+    }
+  }, [dayParam, filter, sourceId, navigate, query])
+
+  const rows = (data?.items ?? []).map((row) => ({ ...row, state: stateFor(row.item.id, row.state) }))
+  useEffect(() => {
+    if (data) rememberStates(data.items.map((row) => [row.item.id, row.state]))
+  }, [data, rememberStates])
+
+  const activeSource = sourceId ? sources.find((source) => source.id === sourceId) : undefined
+  const day = data?.day || (isDayKey(dayParam) ? dayParam : '')
 
   const goDay = (nextDay: string) => {
     const query = params.toString()
@@ -67,10 +78,10 @@ export function FeedView() {
   }
 
   const move = (delta: number) => {
-    if (!visible.length) return
-    const index = visible.findIndex((row) => row.item.id === cursor)
-    const next = index < 0 ? (delta > 0 ? 0 : visible.length - 1) : Math.min(visible.length - 1, Math.max(0, index + delta))
-    setCursor(visible[next]?.item.id ?? null)
+    if (!rows.length) return
+    const index = rows.findIndex((row) => row.item.id === cursor)
+    const next = index < 0 ? (delta > 0 ? 0 : rows.length - 1) : Math.min(rows.length - 1, Math.max(0, index + delta))
+    setCursor(rows[next]?.item.id ?? null)
   }
 
   const openRow = (row: RowModel) => {
@@ -79,9 +90,9 @@ export function FeedView() {
   }
 
   const toggleLater = (id: string) => {
-    const state = library.states[id]
-    if (state?.inLater) removeLater(id)
-    else saveLater(id)
+    if (stateFor(id, rows.find((row) => row.item.id === id)?.state ?? { inLater: false, savedAt: null, readAt: null, readProgress: 0 }).inLater) {
+      removeLater(id)
+    } else saveLater(id)
   }
 
   useHotkeys({
@@ -94,11 +105,11 @@ export function FeedView() {
       if (cursor) markRead(cursor)
     },
     o: () => {
-      const row = visible.find((entry) => entry.item.id === cursor)
+      const row = rows.find((entry) => entry.item.id === cursor)
       if (row) openAction(row.item.actionUrl)
     },
     Enter: () => {
-      const row = visible.find((entry) => entry.item.id === cursor)
+      const row = rows.find((entry) => entry.item.id === cursor)
       if (row) openRow(row)
     },
   })
@@ -124,8 +135,10 @@ export function FeedView() {
           ) : null}
         </div>
       </div>
+      {loading && !data ? <p className="meta">Loading</p> : null}
+      {error ? <p className="meta">{error}</p> : null}
       <ItemList
-        rows={visible}
+        rows={rows}
         from="feed"
         activeId={cursor}
         date="published"
@@ -143,9 +156,9 @@ export function FeedView() {
       {day ? (
         <DayNav
           day={day}
-          earliest={earliest || day}
-          latest={latest || day}
-          counts={counts}
+          earliest={data?.earliest || day}
+          latest={data?.latest || day}
+          counts={data?.counts ?? {}}
           onDay={goDay}
         />
       ) : null}

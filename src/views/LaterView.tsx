@@ -1,17 +1,46 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { later } from '../api.ts'
 import { ItemList } from '../components/ItemList.tsx'
 import { openAction } from '../lib/format.ts'
 import { useHotkeys } from '../lib/hotkeys.ts'
-import { rowsFor, type RowModel } from '../lib/select.ts'
 import { useActions, useLibrary } from '../lib/hooks.ts'
+import type { RowModel } from '../types.ts'
 
 export function LaterView() {
-  const library = useLibrary()
+  const { stateFor, rememberStates } = useLibrary()
   const { markRead, saveLater, removeLater } = useActions()
   const navigate = useNavigate()
-  const rows = rowsFor(library, 'later')
+  const [loaded, setLoaded] = useState<RowModel[]>([])
+  const [error, setError] = useState<string | null>(null)
+  const [loading, setLoading] = useState(true)
   const [cursor, setCursor] = useState<string | null>(null)
+
+  useEffect(() => {
+    let stop = false
+    later()
+      .then((items) => {
+        if (stop) return
+        setLoaded(items)
+        setLoading(false)
+      })
+      .catch((reason: unknown) => {
+        if (stop) return
+        setLoading(false)
+        setError(reason instanceof Error ? reason.message : 'Could not load')
+      })
+    return () => {
+      stop = true
+    }
+  }, [])
+
+  useEffect(() => {
+    rememberStates(loaded.map((row) => [row.item.id, row.state]))
+  }, [loaded, rememberStates])
+
+  const rows = loaded
+    .map((row) => ({ ...row, state: stateFor(row.item.id, row.state) }))
+    .filter((row) => row.state.inLater && !row.state.readAt)
 
   const move = (delta: number) => {
     if (!rows.length) return
@@ -43,6 +72,8 @@ export function LaterView() {
 
   return (
     <main className="sheet">
+      {loading ? <p className="meta">Loading</p> : null}
+      {error ? <p className="meta">{error}</p> : null}
       <ItemList
         rows={rows}
         from="later"

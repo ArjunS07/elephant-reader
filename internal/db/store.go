@@ -1,0 +1,994 @@
+package db
+
+import (
+	"database/sql"
+	"encoding/json"
+	"errors"
+	"strings"
+
+	"elephant/internal/model"
+)
+
+var ErrNotFound = errors.New("not found")
+
+const rowSelect = `
+SELECT
+  i.id, i.source_id, i.external_id, i.canonical_url, i.discussion_url,
+  i.title, i.author, i.published_at, i.published_day, i.open_mode, i.action_url,
+  i.content_markdown, i.plain_text, i.excerpt, i.metadata_json, i.created_at, i.updated_at,
+  src.id, src.name, src.source_type, src.folder, src.default_open_mode, src.default_queue,
+  src.feed_url, src.email_alias, src.config_json, src.enabled, src.last_fetched_at, src.created_at, src.updated_at,
+  IFNULL(st.in_later, 0), st.saved_at, st.read_at, IFNULL(st.read_progress, 0),
+  (SELECT COUNT(*) FROM highlights h WHERE h.item_id = i.id)
+FROM items i
+JOIN sources src ON src.id = i.source_id
+LEFT JOIN user_item_state st ON st.item_id = i.id
+`
+
+type filter struct {
+	Folder   string
+	SourceID string
+}
+
+func (s *Store) UpsertSource(src model.Source) (model.Source, error) {
+	now := Now()
+	if src.CreatedAt == "" {
+		src.CreatedAt = now
+	}
+	src.UpdatedAt = now
+	if src.Config == nil {
+		src.Config = map[string]any{}
+	}
+	config, err := json.Marshal(src.Config)
+	if err != nil {
+		return model.Source{}, err
+	}
+	enabled := 0
+	if src.Enabled {
+		enabled = 1
+	}
+	_, err = s.SQL.Exec(`
+INSERT INTO sources (
+  id, name, source_type, folder, default_open_mode, default_queue,
+  feed_url, email_alias, config_json, enabled, last_fetched_at, created_at, updated_at
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+ON CONFLICT(id) DO UPDATE SET
+  name = excluded.name,
+  source_type = excluded.source_type,
+  folder = excluded.folder,
+  default_open_mode = excluded.default_open_mode,
+  default_queue = excluded.default_queue,
+  feed_url = excluded.feed_url,
+  email_alias = CASE
+    WHEN sources.email_alias IS NOT NULL AND sources.email_alias != '' THEN sources.email_alias
+    ELSE excluded.email_alias
+  END,
+  config_json = excluded.config_json,
+  updated_at = excluded.updated_at
+`, src.ID, src.Name, src.SourceType, src.Folder, src.DefaultOpenMode, src.DefaultQueue,
+		NullString(src.FeedURL), NullString(src.EmailAlias), string(config), enabled, nil, src.CreatedAt, src.UpdatedAt)
+	if err != nil {
+		return model.Source{}, err
+	}
+	return s.GetSource(src.ID)
+}
+
+func (s *Store) InsertSource(src model.Source) (model.Source, error) {
+	now := Now()
+	if src.CreatedAt == "" {
+		src.CreatedAt = now
+	}
+	src.UpdatedAt = now
+	if src.Config == nil {
+		src.Config = map[string]any{}
+	}
+	config, err := json.Marshal(src.Config)
+	if err != nil {
+		return model.Source{}, err
+	}
+	enabled := 0
+	if src.Enabled {
+		enabled = 1
+	}
+	_, err = s.SQL.Exec(`
+INSERT INTO sources (
+  id, name, source_type, folder, default_open_mode, default_queue,
+  feed_url, email_alias, config_json, enabled, last_fetched_at, created_at, updated_at
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?)
+`, src.ID, src.Name, src.SourceType, src.Folder, src.DefaultOpenMode, src.DefaultQueue,
+		NullString(src.FeedURL), NullString(src.EmailAlias), string(config), enabled, src.CreatedAt, src.UpdatedAt)
+	if err != nil {
+		return model.Source{}, err
+	}
+	return s.GetSource(src.ID)
+}
+
+func (s *Store) ListSources() ([]model.Source, error) {
+	rows, err := s.SQL.Query(`
+SELECT id, name, source_type, folder, default_open_mode, default_queue,
+  feed_url, email_alias, config_json, enabled, last_fetched_at, created_at, updated_at
+FROM sources
+ORDER BY name COLLATE NOCASE, id
+`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []model.Source
+	for rows.Next() {
+		src, err := scanSource(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, src)
+	}
+	if out == nil {
+		out = []model.Source{}
+	}
+	return out, rows.Err()
+}
+
+func (s *Store) GetSource(id string) (model.Source, error) {
+	row := s.SQL.QueryRow(`
+SELECT id, name, source_type, folder, default_open_mode, default_queue,
+  feed_url, email_alias, config_json, enabled, last_fetched_at, created_at, updated_at
+FROM sources WHERE id = ?
+`, id)
+	src, err := scanSource(row)
+	if errors.Is(err, sql.ErrNoRows) {
+		return model.Source{}, ErrNotFound
+	}
+	return src, err
+}
+
+func (s *Store) FindSourceByAlias(alias string) (model.Source, error) {
+	row := s.SQL.QueryRow(`
+SELECT id, name, source_type, folder, default_open_mode, default_queue,
+  feed_url, email_alias, config_json, enabled, last_fetched_at, created_at, updated_at
+FROM sources WHERE lower(email_alias) = lower(?)
+`, strings.TrimSpace(alias))
+	src, err := scanSource(row)
+	if errors.Is(err, sql.ErrNoRows) {
+		return model.Source{}, ErrNotFound
+	}
+	return src, err
+}
+
+func (s *Store) AliasTaken(alias string) (bool, error) {
+	var n int
+	err := s.SQL.QueryRow(`SELECT COUNT(*) FROM sources WHERE lower(email_alias) = lower(?)`, alias).Scan(&n)
+	return n > 0, err
+}
+
+type SourcePatch struct {
+	Name            *string
+	Folder          *string
+	DefaultOpenMode *string
+	DefaultQueue    *string
+	FeedURL         *string
+	EmailAlias      *string
+	Enabled         *bool
+	Config          map[string]any
+	HasConfig       bool
+	LastFetchedAt   *string
+	TouchFetched    bool
+}
+
+func (s *Store) PatchSource(id string, patch SourcePatch) (model.Source, error) {
+	current, err := s.GetSource(id)
+	if err != nil {
+		return model.Source{}, err
+	}
+	if patch.Name != nil {
+		current.Name = *patch.Name
+	}
+	if patch.Folder != nil {
+		current.Folder = *patch.Folder
+	}
+	if patch.DefaultOpenMode != nil {
+		current.DefaultOpenMode = *patch.DefaultOpenMode
+	}
+	if patch.DefaultQueue != nil {
+		current.DefaultQueue = *patch.DefaultQueue
+	}
+	if patch.FeedURL != nil {
+		current.FeedURL = *patch.FeedURL
+	}
+	if patch.EmailAlias != nil {
+		current.EmailAlias = *patch.EmailAlias
+	}
+	if patch.Enabled != nil {
+		current.Enabled = *patch.Enabled
+	}
+	if patch.HasConfig {
+		current.Config = patch.Config
+	}
+	if patch.TouchFetched {
+		current.LastFetchedAt = patch.LastFetchedAt
+	}
+	if current.Config == nil {
+		current.Config = map[string]any{}
+	}
+	config, err := json.Marshal(current.Config)
+	if err != nil {
+		return model.Source{}, err
+	}
+	enabled := 0
+	if current.Enabled {
+		enabled = 1
+	}
+	now := Now()
+	_, err = s.SQL.Exec(`
+UPDATE sources SET
+  name = ?, folder = ?, default_open_mode = ?, default_queue = ?,
+  feed_url = ?, email_alias = ?, config_json = ?, enabled = ?,
+  last_fetched_at = ?, updated_at = ?
+WHERE id = ?
+`, current.Name, current.Folder, current.DefaultOpenMode, current.DefaultQueue,
+		NullString(current.FeedURL), NullString(current.EmailAlias), string(config), enabled,
+		nullablePtr(current.LastFetchedAt), now, id)
+	if err != nil {
+		return model.Source{}, err
+	}
+	return s.GetSource(id)
+}
+
+func (s *Store) DeleteSource(id string) error {
+	return s.withTx(func(tx *sql.Tx) error {
+		if _, err := tx.Exec(`DELETE FROM items_fts WHERE item_id IN (SELECT id FROM items WHERE source_id = ?)`, id); err != nil {
+			return err
+		}
+		res, err := tx.Exec(`DELETE FROM sources WHERE id = ?`, id)
+		if err != nil {
+			return err
+		}
+		n, err := res.RowsAffected()
+		if err != nil {
+			return err
+		}
+		if n == 0 {
+			return ErrNotFound
+		}
+		return nil
+	})
+}
+
+func (s *Store) EnsureManualSource() (model.Source, error) {
+	row := s.SQL.QueryRow(`
+SELECT id FROM sources
+WHERE source_type = 'manual' AND (id = 'src_chrome' OR lower(name) = 'chrome')
+LIMIT 1
+`)
+	var id string
+	err := row.Scan(&id)
+	if err == nil {
+		return s.GetSource(id)
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		return model.Source{}, err
+	}
+	err = s.SQL.QueryRow(`
+SELECT id FROM sources WHERE source_type = 'manual' AND default_queue = 'later' LIMIT 1
+`).Scan(&id)
+	if err == nil {
+		return s.GetSource(id)
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		return model.Source{}, err
+	}
+	return s.InsertSource(model.Source{
+		ID:              "src_chrome",
+		Name:            "Chrome",
+		SourceType:      "manual",
+		Folder:          "Blogs",
+		DefaultOpenMode: "external",
+		DefaultQueue:    "later",
+		Enabled:         true,
+		Config:          map[string]any{},
+	})
+}
+
+func (s *Store) FindItemID(sourceID, externalID, canonical string) (string, error) {
+	var id string
+	if sourceID != "" && externalID != "" {
+		err := s.SQL.QueryRow(`SELECT id FROM items WHERE source_id = ? AND external_id = ?`, sourceID, externalID).Scan(&id)
+		if err == nil {
+			return id, nil
+		}
+		if !errors.Is(err, sql.ErrNoRows) {
+			return "", err
+		}
+	}
+	if canonical != "" {
+		err := s.SQL.QueryRow(`SELECT id FROM items WHERE canonical_url = ?`, canonical).Scan(&id)
+		if err == nil {
+			return id, nil
+		}
+		if !errors.Is(err, sql.ErrNoRows) {
+			return "", err
+		}
+	}
+	return "", ErrNotFound
+}
+
+type ItemWrite struct {
+	ID              string
+	SourceID        string
+	ExternalID      string
+	CanonicalURL    string
+	DiscussionURL   string
+	Title           string
+	Author          string
+	PublishedAt     string
+	PublishedDay    string
+	OpenMode        string
+	ActionURL       string
+	ContentMarkdown string
+	PlainText       string
+	Excerpt         string
+	Metadata        json.RawMessage
+}
+
+func (s *Store) InsertItem(item ItemWrite, initial *model.InitialState) (model.Item, error) {
+	now := Now()
+	err := s.withTx(func(tx *sql.Tx) error {
+		_, err := tx.Exec(`
+INSERT INTO items (
+  id, source_id, external_id, canonical_url, discussion_url, title, author,
+  published_at, published_day, open_mode, action_url, content_markdown, plain_text,
+  excerpt, metadata_json, created_at, updated_at
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+`, item.ID, item.SourceID, item.ExternalID, item.CanonicalURL, NullString(item.DiscussionURL),
+			item.Title, item.Author, item.PublishedAt, item.PublishedDay, item.OpenMode, item.ActionURL,
+			NullString(item.ContentMarkdown), item.PlainText, NullString(item.Excerpt), string(item.Metadata), now, now)
+		if err != nil {
+			return err
+		}
+		inLater, savedAt, readAt, progress := stateFromInitial(initial, now)
+		_, err = tx.Exec(`
+INSERT INTO user_item_state (item_id, in_later, saved_at, read_at, read_progress, updated_at)
+VALUES (?, ?, ?, ?, ?, ?)
+`, item.ID, inLater, savedAt, readAt, progress, now)
+		if err != nil {
+			return err
+		}
+		return reindexTx(tx, item.ID)
+	})
+	if err != nil {
+		return model.Item{}, err
+	}
+	got, _, _, _, err := s.GetItem(item.ID)
+	return got, err
+}
+
+func (s *Store) UpdateItem(id string, item ItemWrite, initial *model.InitialState) (model.Item, error) {
+	now := Now()
+	err := s.withTx(func(tx *sql.Tx) error {
+		_, err := tx.Exec(`
+UPDATE items SET
+  discussion_url = ?, title = ?, author = ?, published_at = ?, published_day = ?,
+  open_mode = ?, action_url = ?, content_markdown = ?, plain_text = ?, excerpt = ?,
+  metadata_json = ?, updated_at = ?
+WHERE id = ?
+`, NullString(item.DiscussionURL), item.Title, item.Author, item.PublishedAt, item.PublishedDay,
+			item.OpenMode, item.ActionURL, NullString(item.ContentMarkdown), item.PlainText, NullString(item.Excerpt),
+			string(item.Metadata), now, id)
+		if err != nil {
+			return err
+		}
+		if _, err := tx.Exec(`
+INSERT INTO user_item_state (item_id, in_later, saved_at, read_at, read_progress, updated_at)
+VALUES (?, 0, NULL, NULL, 0, ?)
+ON CONFLICT(item_id) DO NOTHING
+`, id, now); err != nil {
+			return err
+		}
+		if initial != nil {
+			if err := applyInitialTx(tx, id, initial, now); err != nil {
+				return err
+			}
+		}
+		return reindexTx(tx, id)
+	})
+	if err != nil {
+		return model.Item{}, err
+	}
+	got, _, _, _, err := s.GetItem(id)
+	return got, err
+}
+
+func (s *Store) PutState(id string, state model.UserItemState) error {
+	now := Now()
+	inLater := 0
+	if state.InLater {
+		inLater = 1
+	}
+	_, err := s.SQL.Exec(`
+INSERT INTO user_item_state (item_id, in_later, saved_at, read_at, read_progress, updated_at)
+VALUES (?, ?, ?, ?, ?, ?)
+ON CONFLICT(item_id) DO UPDATE SET
+  in_later = excluded.in_later,
+  saved_at = excluded.saved_at,
+  read_at = excluded.read_at,
+  read_progress = excluded.read_progress,
+  updated_at = excluded.updated_at
+`, id, inLater, nullablePtr(state.SavedAt), nullablePtr(state.ReadAt), clampProgress(state.ReadProgress), now)
+	return err
+}
+
+type StatePatch struct {
+	InLater      *bool
+	ReadAtSet    bool
+	ReadAt       *string
+	ProgressSet  bool
+	ReadProgress float64
+}
+
+func (s *Store) PatchState(id string, patch StatePatch) (model.UserItemState, error) {
+	var exists string
+	if err := s.SQL.QueryRow(`SELECT id FROM items WHERE id = ?`, id).Scan(&exists); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return model.UserItemState{}, ErrNotFound
+		}
+		return model.UserItemState{}, err
+	}
+	now := Now()
+	err := s.withTx(func(tx *sql.Tx) error {
+		if _, err := tx.Exec(`
+INSERT INTO user_item_state (item_id, in_later, saved_at, read_at, read_progress, updated_at)
+VALUES (?, 0, NULL, NULL, 0, ?)
+ON CONFLICT(item_id) DO NOTHING
+`, id, now); err != nil {
+			return err
+		}
+		var inLater int
+		var saved, read sql.NullString
+		var progress float64
+		if err := tx.QueryRow(`SELECT in_later, saved_at, read_at, read_progress FROM user_item_state WHERE item_id = ?`, id).
+			Scan(&inLater, &saved, &read, &progress); err != nil {
+			return err
+		}
+		if patch.InLater != nil {
+			if *patch.InLater {
+				inLater = 1
+				if !saved.Valid {
+					saved = sql.NullString{String: now, Valid: true}
+				}
+			} else {
+				inLater = 0
+				saved = sql.NullString{}
+			}
+		}
+		if patch.ReadAtSet {
+			read = nullablePtr(patch.ReadAt)
+		}
+		if patch.ProgressSet {
+			progress = clampProgress(patch.ReadProgress)
+		}
+		_, err := tx.Exec(`
+UPDATE user_item_state SET in_later = ?, saved_at = ?, read_at = ?, read_progress = ?, updated_at = ?
+WHERE item_id = ?
+`, inLater, saved, read, progress, now, id)
+		return err
+	})
+	if err != nil {
+		return model.UserItemState{}, err
+	}
+	_, _, state, _, err := s.GetItem(id)
+	return state, err
+}
+
+func (s *Store) GetItem(id string) (model.Item, model.Source, model.UserItemState, []model.Highlight, error) {
+	row := s.SQL.QueryRow(rowSelect+` WHERE i.id = ?`, id)
+	item, source, state, _, err := scanRow(row)
+	if errors.Is(err, sql.ErrNoRows) {
+		return model.Item{}, model.Source{}, model.UserItemState{}, nil, ErrNotFound
+	}
+	if err != nil {
+		return model.Item{}, model.Source{}, model.UserItemState{}, nil, err
+	}
+	highlights, err := s.ListHighlights(id)
+	if err != nil {
+		return model.Item{}, model.Source{}, model.UserItemState{}, nil, err
+	}
+	return item, source, state, highlights, nil
+}
+
+func (s *Store) ListHighlights(itemID string) ([]model.Highlight, error) {
+	rows, err := s.SQL.Query(`
+SELECT id, item_id, quote, prefix, suffix, note, created_at, updated_at
+FROM highlights WHERE item_id = ? ORDER BY created_at, id
+`, itemID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []model.Highlight
+	for rows.Next() {
+		var h model.Highlight
+		if err := rows.Scan(&h.ID, &h.ItemID, &h.Quote, &h.Prefix, &h.Suffix, &h.Note, &h.CreatedAt, &h.UpdatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, h)
+	}
+	if out == nil {
+		out = []model.Highlight{}
+	}
+	return out, rows.Err()
+}
+
+func (s *Store) AddHighlight(h model.Highlight) (model.Highlight, error) {
+	now := Now()
+	if h.CreatedAt == "" {
+		h.CreatedAt = now
+	}
+	h.UpdatedAt = now
+	err := s.withTx(func(tx *sql.Tx) error {
+		var item string
+		if err := tx.QueryRow(`SELECT id FROM items WHERE id = ?`, h.ItemID).Scan(&item); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return ErrNotFound
+			}
+			return err
+		}
+		if _, err := tx.Exec(`
+INSERT INTO highlights (id, item_id, quote, prefix, suffix, note, created_at, updated_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+`, h.ID, h.ItemID, h.Quote, h.Prefix, h.Suffix, h.Note, h.CreatedAt, h.UpdatedAt); err != nil {
+			return err
+		}
+		return reindexTx(tx, h.ItemID)
+	})
+	if err != nil {
+		return model.Highlight{}, err
+	}
+	return s.GetHighlight(h.ID)
+}
+
+func (s *Store) GetHighlight(id string) (model.Highlight, error) {
+	var h model.Highlight
+	err := s.SQL.QueryRow(`
+SELECT id, item_id, quote, prefix, suffix, note, created_at, updated_at FROM highlights WHERE id = ?
+`, id).Scan(&h.ID, &h.ItemID, &h.Quote, &h.Prefix, &h.Suffix, &h.Note, &h.CreatedAt, &h.UpdatedAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return model.Highlight{}, ErrNotFound
+	}
+	return h, err
+}
+
+func (s *Store) PatchHighlight(id, note string) (model.Highlight, error) {
+	now := Now()
+	var itemID string
+	err := s.withTx(func(tx *sql.Tx) error {
+		if err := tx.QueryRow(`SELECT item_id FROM highlights WHERE id = ?`, id).Scan(&itemID); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return ErrNotFound
+			}
+			return err
+		}
+		if _, err := tx.Exec(`UPDATE highlights SET note = ?, updated_at = ? WHERE id = ?`, note, now, id); err != nil {
+			return err
+		}
+		return reindexTx(tx, itemID)
+	})
+	if err != nil {
+		return model.Highlight{}, err
+	}
+	return s.GetHighlight(id)
+}
+
+func (s *Store) DeleteHighlight(id string) error {
+	return s.withTx(func(tx *sql.Tx) error {
+		var itemID string
+		if err := tx.QueryRow(`SELECT item_id FROM highlights WHERE id = ?`, id).Scan(&itemID); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return ErrNotFound
+			}
+			return err
+		}
+		if _, err := tx.Exec(`DELETE FROM highlights WHERE id = ?`, id); err != nil {
+			return err
+		}
+		return reindexTx(tx, itemID)
+	})
+}
+
+func (s *Store) GetPreferences() (model.Preferences, error) {
+	var p model.Preferences
+	err := s.SQL.QueryRow(`
+SELECT theme, font_family, font_size, line_height, column_width, align, updated_at
+FROM user_preferences WHERE id = 1
+`).Scan(&p.Theme, &p.FontFamily, &p.FontSize, &p.LineHeight, &p.ColumnWidth, &p.Align, &p.UpdatedAt)
+	return p, err
+}
+
+func (s *Store) SavePreferences(p model.Preferences) (model.Preferences, error) {
+	p.UpdatedAt = Now()
+	_, err := s.SQL.Exec(`
+UPDATE user_preferences SET
+  theme = ?, font_family = ?, font_size = ?, line_height = ?, column_width = ?, align = ?, updated_at = ?
+WHERE id = 1
+`, p.Theme, p.FontFamily, p.FontSize, p.LineHeight, p.ColumnWidth, p.Align, p.UpdatedAt)
+	if err != nil {
+		return model.Preferences{}, err
+	}
+	return s.GetPreferences()
+}
+
+func (s *Store) Counts(folder, sourceID string) (map[string]int, error) {
+	where, args := filterSQL(folder, sourceID)
+	rows, err := s.SQL.Query(`
+SELECT i.published_day, COUNT(*)
+FROM items i
+JOIN sources src ON src.id = i.source_id
+`+where+`
+GROUP BY i.published_day
+ORDER BY i.published_day
+`, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string]int{}
+	for rows.Next() {
+		var day string
+		var n int
+		if err := rows.Scan(&day, &n); err != nil {
+			return nil, err
+		}
+		out[day] = n
+	}
+	return out, rows.Err()
+}
+
+func (s *Store) DayItems(day, folder, sourceID string) ([]model.ItemRow, error) {
+	where, args := filterSQL(folder, sourceID)
+	args = append(args, day)
+	rows, err := s.SQL.Query(rowSelect+where+` AND i.published_day = ? ORDER BY i.published_at DESC, i.id DESC`, args...)
+	if err != nil {
+		return nil, err
+	}
+	return collectRows(rows)
+}
+
+func (s *Store) Later() ([]model.ItemRow, error) {
+	rows, err := s.SQL.Query(rowSelect + `
+WHERE src.enabled = 1 AND st.in_later = 1 AND st.read_at IS NULL
+ORDER BY st.saved_at DESC, i.id DESC
+`)
+	if err != nil {
+		return nil, err
+	}
+	return collectRows(rows)
+}
+
+func (s *Store) Read(match string, limit, offset int) ([]model.ItemRow, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	if limit > 200 {
+		limit = 200
+	}
+	if offset < 0 {
+		offset = 0
+	}
+	query := rowSelect + ` WHERE st.read_at IS NOT NULL`
+	var args []any
+	if match != "" {
+		query += ` AND i.id IN (SELECT item_id FROM items_fts WHERE items_fts MATCH ?)`
+		args = append(args, match)
+	}
+	query += ` ORDER BY st.read_at DESC, i.id DESC LIMIT ? OFFSET ?`
+	args = append(args, limit, offset)
+	rows, err := s.SQL.Query(query, args...)
+	if err != nil {
+		return nil, err
+	}
+	return collectRows(rows)
+}
+
+func filterSQL(folder, sourceID string) (string, []any) {
+	parts := []string{"WHERE src.enabled = 1"}
+	var args []any
+	if sourceID != "" {
+		parts = append(parts, "src.id = ?")
+		args = append(args, sourceID)
+	}
+	switch folder {
+	case "", "All":
+	case "RSS":
+		parts = append(parts, "src.source_type = 'rss'")
+	default:
+		parts = append(parts, "src.folder = ?")
+		args = append(args, folder)
+	}
+	return strings.Join(parts, " AND ") + " ", args
+}
+
+func collectRows(rows *sql.Rows) ([]model.ItemRow, error) {
+	defer rows.Close()
+	var out []model.ItemRow
+	for rows.Next() {
+		item, source, state, count, err := scanRow(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, model.ItemRow{Item: item, Source: source, State: state, HighlightCount: count})
+	}
+	if out == nil {
+		out = []model.ItemRow{}
+	}
+	return out, rows.Err()
+}
+
+type scanner interface {
+	Scan(dest ...any) error
+}
+
+func scanSource(sc scanner) (model.Source, error) {
+	var src model.Source
+	var feed, alias, config, fetched sql.NullString
+	var enabled int
+	err := sc.Scan(
+		&src.ID, &src.Name, &src.SourceType, &src.Folder, &src.DefaultOpenMode, &src.DefaultQueue,
+		&feed, &alias, &config, &enabled, &fetched, &src.CreatedAt, &src.UpdatedAt,
+	)
+	if err != nil {
+		return model.Source{}, err
+	}
+	src.FeedURL = StringOf(feed)
+	src.EmailAlias = StringOf(alias)
+	src.Enabled = enabled == 1
+	src.LastFetchedAt = StringPtr(fetched)
+	src.Config = map[string]any{}
+	if config.Valid && config.String != "" {
+		_ = json.Unmarshal([]byte(config.String), &src.Config)
+	}
+	return src, nil
+}
+
+func scanRow(sc scanner) (model.Item, model.Source, model.UserItemState, int, error) {
+	var item model.Item
+	var discussion, markdown, excerpt, meta sql.NullString
+	var source model.Source
+	var feed, alias, config, fetched sql.NullString
+	var enabled, inLater int
+	var saved, read sql.NullString
+	var progress float64
+	var count int
+	err := sc.Scan(
+		&item.ID, &item.SourceID, &item.ExternalID, &item.CanonicalURL, &discussion,
+		&item.Title, &item.Author, &item.PublishedAt, &item.PublishedDay, &item.OpenMode, &item.ActionURL,
+		&markdown, &item.PlainText, &excerpt, &meta, &item.CreatedAt, &item.UpdatedAt,
+		&source.ID, &source.Name, &source.SourceType, &source.Folder, &source.DefaultOpenMode, &source.DefaultQueue,
+		&feed, &alias, &config, &enabled, &fetched, &source.CreatedAt, &source.UpdatedAt,
+		&inLater, &saved, &read, &progress, &count,
+	)
+	if err != nil {
+		return model.Item{}, model.Source{}, model.UserItemState{}, 0, err
+	}
+	item.DiscussionURL = StringOf(discussion)
+	item.ContentMarkdown = StringOf(markdown)
+	item.Excerpt = StringOf(excerpt)
+	if meta.Valid && meta.String != "" {
+		item.Metadata = json.RawMessage(meta.String)
+	} else {
+		item.Metadata = json.RawMessage(`{"kind":"generic"}`)
+	}
+	decorateItem(&item)
+	source.FeedURL = StringOf(feed)
+	source.EmailAlias = StringOf(alias)
+	source.Enabled = enabled == 1
+	source.LastFetchedAt = StringPtr(fetched)
+	source.Config = map[string]any{}
+	if config.Valid && config.String != "" {
+		_ = json.Unmarshal([]byte(config.String), &source.Config)
+	}
+	state := model.UserItemState{
+		InLater:      inLater == 1,
+		SavedAt:      StringPtr(saved),
+		ReadAt:       StringPtr(read),
+		ReadProgress: progress,
+	}
+	return item, source, state, count, nil
+}
+
+func decorateItem(item *model.Item) {
+	var extra struct {
+		TractionNote     string                  `json:"tractionNote"`
+		DiscussionQuotes []model.DiscussionQuote `json:"discussionQuotes"`
+	}
+	_ = json.Unmarshal(item.Metadata, &extra)
+	if item.TractionNote == "" {
+		item.TractionNote = extra.TractionNote
+	}
+	if len(item.DiscussionQuotes) == 0 && len(extra.DiscussionQuotes) > 0 {
+		item.DiscussionQuotes = extra.DiscussionQuotes
+	}
+}
+
+func stateFromInitial(initial *model.InitialState, now string) (int, sql.NullString, sql.NullString, float64) {
+	if initial == nil {
+		return 0, sql.NullString{}, sql.NullString{}, 0
+	}
+	inLater := 0
+	var saved sql.NullString
+	if initial.InLater != nil && *initial.InLater {
+		inLater = 1
+		saved = sql.NullString{String: now, Valid: true}
+	}
+	return inLater, saved, nullablePtr(initial.ReadAt), 0
+}
+
+func applyInitialTx(tx *sql.Tx, id string, initial *model.InitialState, now string) error {
+	var inLater int
+	var saved, read sql.NullString
+	var progress float64
+	if err := tx.QueryRow(`SELECT in_later, saved_at, read_at, read_progress FROM user_item_state WHERE item_id = ?`, id).
+		Scan(&inLater, &saved, &read, &progress); err != nil {
+		return err
+	}
+	if initial.InLater != nil {
+		if *initial.InLater {
+			inLater = 1
+			if !saved.Valid {
+				saved = sql.NullString{String: now, Valid: true}
+			}
+		} else {
+			inLater = 0
+			saved = sql.NullString{}
+		}
+	}
+	if initial.ReadAt != nil {
+		read = sql.NullString{String: *initial.ReadAt, Valid: *initial.ReadAt != ""}
+	}
+	_, err := tx.Exec(`
+UPDATE user_item_state SET in_later = ?, saved_at = ?, read_at = ?, updated_at = ? WHERE item_id = ?
+`, inLater, saved, read, now, id)
+	return err
+}
+
+func reindexTx(tx *sql.Tx, itemID string) error {
+	var title, author, plain, meta string
+	if err := tx.QueryRow(`SELECT title, author, plain_text, metadata_json FROM items WHERE id = ?`, itemID).
+		Scan(&title, &author, &plain, &meta); err != nil {
+		return err
+	}
+	rows, err := tx.Query(`SELECT quote, note FROM highlights WHERE item_id = ?`, itemID)
+	if err != nil {
+		return err
+	}
+	var notes []string
+	for rows.Next() {
+		var quote, note string
+		if err := rows.Scan(&quote, &note); err != nil {
+			rows.Close()
+			return err
+		}
+		notes = append(notes, quote, note)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`DELETE FROM items_fts WHERE item_id = ?`, itemID); err != nil {
+		return err
+	}
+	_, err = tx.Exec(`
+INSERT INTO items_fts (item_id, title, author, plain_text, metadata_text, highlights_text)
+VALUES (?, ?, ?, ?, ?, ?)
+`, itemID, title, author, plain, metadataText(json.RawMessage(meta)), strings.Join(notes, "\n"))
+	return err
+}
+
+func metadataText(raw json.RawMessage) string {
+	var v any
+	if err := json.Unmarshal(raw, &v); err != nil {
+		return ""
+	}
+	var b strings.Builder
+	walkText(v, &b)
+	return b.String()
+}
+
+func walkText(v any, b *strings.Builder) {
+	switch t := v.(type) {
+	case string:
+		if strings.TrimSpace(t) != "" {
+			if b.Len() > 0 {
+				b.WriteByte('\n')
+			}
+			b.WriteString(t)
+		}
+	case []any:
+		for _, item := range t {
+			walkText(item, b)
+		}
+	case map[string]any:
+		for _, item := range t {
+			walkText(item, b)
+		}
+	}
+}
+
+func nullablePtr(v *string) sql.NullString {
+	if v == nil || strings.TrimSpace(*v) == "" {
+		return sql.NullString{}
+	}
+	return sql.NullString{String: *v, Valid: true}
+}
+
+func clampProgress(v float64) float64 {
+	if v < 0 {
+		return 0
+	}
+	if v > 1 {
+		return 1
+	}
+	return v
+}
+
+func MatchQuery(q string) string {
+	fields := strings.Fields(q)
+	parts := make([]string, 0, len(fields))
+	for _, field := range fields {
+		field = strings.Trim(field, `"`)
+		if field == "" {
+			continue
+		}
+		parts = append(parts, `"`+strings.ReplaceAll(field, `"`, `""`)+`"`)
+	}
+	return strings.Join(parts, " AND ")
+}
+
+func Days(counts map[string]int) (earliest, latest string, days []string) {
+	for day := range counts {
+		days = append(days, day)
+	}
+	if len(days) == 0 {
+		return "", "", nil
+	}
+	for i := 1; i < len(days); i++ {
+		j := i
+		for j > 0 && days[j] < days[j-1] {
+			days[j], days[j-1] = days[j-1], days[j]
+			j--
+		}
+	}
+	return days[0], days[len(days)-1], days
+}
+
+func NeighborDays(days []string, day string) (prev, next *string) {
+	for _, candidate := range days {
+		if candidate < day {
+			c := candidate
+			prev = &c
+		} else if candidate > day && next == nil {
+			c := candidate
+			next = &c
+		}
+	}
+	return prev, next
+}
+
+func MinPoints(config map[string]any) int {
+	if config == nil {
+		return 50
+	}
+	switch v := config["minPoints"].(type) {
+	case float64:
+		if v > 0 {
+			return int(v)
+		}
+	case int:
+		if v > 0 {
+			return v
+		}
+	case json.Number:
+		n, _ := v.Int64()
+		if n > 0 {
+			return int(n)
+		}
+	}
+	return 50
+}

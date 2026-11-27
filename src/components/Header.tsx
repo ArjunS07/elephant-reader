@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { Link, useLocation } from 'react-router-dom'
 import { useEscape } from '../lib/hotkeys.ts'
 import { useActions, useLibrary } from '../lib/hooks.ts'
-import type { ColumnAlign, ColumnWidth, FontFamily, ThemeName } from '../types/model.ts'
+import type { ColumnAlign, ColumnWidth, FontFamily, ThemeName } from '../types.ts'
 
 const NAV = [
   { to: '/feed', label: 'Feed' },
@@ -193,8 +193,8 @@ function Settings({ reader }: { reader: boolean }) {
         <div className="choices">
           {(
             [
-              ['narrow', 'Cozy', 'Cozy, 600px'],
-              ['default', 'Standard', 'Standard, 672px'],
+              ['cozy', 'Cozy', 'Cozy, 600px'],
+              ['standard', 'Standard', 'Standard, 672px'],
               ['wide', 'Wide', 'Wide, 760px'],
             ] as const
           ).map(([value, label, title]) => (

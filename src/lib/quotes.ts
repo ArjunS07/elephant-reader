@@ -1,4 +1,4 @@
-import type { DiscussionQuote, Item, QuoteKind } from '../types/model.ts'
+import type { DiscussionQuote, Item, QuoteKind } from '../types.ts'
 
 const WATCHLIST = new Set([
   'Lena Voss',
@@ -19,7 +19,7 @@ const WATCHLIST = new Set([
 export function quotesOf(item: Item): DiscussionQuote[] {
   const shared = item.discussionQuotes ?? []
   if (item.metadata.kind === 'paper') {
-    return shared.length ? shared : item.metadata.discussionQuotes
+    return shared.length ? shared : (item.metadata.discussionQuotes ?? [])
   }
   return shared
 }
@@ -32,7 +32,7 @@ export function tractionOf(item: Item): string | undefined {
 
 export function labLine(item: Item): string | null {
   if (item.metadata.kind !== 'paper') return null
-  const parts = [...item.metadata.affiliations]
+  const parts = [...(item.metadata.affiliations ?? [])]
   if (item.metadata.venue) parts.push(item.metadata.venue)
   return parts.length ? parts.join(' · ') : null
 }
@@ -47,15 +47,4 @@ export function kindLabel(kind: QuoteKind | undefined): string | null {
   if (kind === 'reply') return 'Reply'
   if (kind === 'self-reply') return 'Self-reply'
   return null
-}
-
-export function quoteSearchChunks(quotes: DiscussionQuote[]): string[] {
-  const chunks: string[] = []
-  for (const quote of quotes) {
-    chunks.push(quote.speaker, quote.text, quote.affiliation ?? '', quote.traction ?? '', quote.kind ?? '')
-    for (const reply of quote.replies ?? []) {
-      chunks.push(reply.text, reply.traction ?? '')
-    }
-  }
-  return chunks
 }

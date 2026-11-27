@@ -1,4 +1,4 @@
-import type { Item, Source } from '../types/model.ts'
+import type { Item, Source } from '../types.ts'
 import { formatDate } from './format.ts'
 import { escapeHtml, markdownToHtml } from './markdown.ts'
 
@@ -21,14 +21,14 @@ export function byline(item: Item, source: Source | undefined, when = item.publi
 export function articleHtml(item: Item, source: Source | undefined): string {
   if (item.metadata.kind === 'paper') {
     const paper = item.metadata
-    const links = paper.links
+    const links = (paper.links ?? [])
       .map(
         (link) =>
           `<a href="${escapeHtml(link.url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(link.label)}</a>`,
       )
       .join('')
     return [
-      `<p class="authors">${escapeHtml(paper.authors.join(', '))}</p>`,
+      `<p class="authors">${escapeHtml((paper.authors ?? []).join(', '))}</p>`,
       `<p class="affiliations">${escapeHtml([...paper.affiliations, paper.venue].filter(Boolean).join(' · '))}</p>`,
       `<p class="byline">${escapeHtml(formatDate(item.publishedAt))}</p>`,
       `<p class="abstract">${escapeHtml(paper.abstract)}</p>`,

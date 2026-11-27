@@ -1,13 +1,12 @@
 {
-  "name": "field",
+  "name": "elephant",
   "private": true,
   "version": "0.0.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc -b && vite build && node scripts/static-routes.mjs",
-    "lint": "oxlint",
-    "preview": "vite preview"
+    "build": "tsc -b && vite build",
+    "lint": "oxlint"
   },
   "dependencies": {
     "react": "^19.3.1",

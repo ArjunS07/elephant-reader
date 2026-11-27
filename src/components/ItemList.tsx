@@ -1,9 +1,8 @@
 import { useEffect, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { excerpt } from '../lib/excerpt.ts'
 import { auxiliaryParts, formatDate, isHttpUrl, readPercent } from '../lib/format.ts'
 import { labLine } from '../lib/quotes.ts'
-import type { RowModel } from '../lib/select.ts'
+import type { RowModel } from '../types.ts'
 import { IconDiscussion, IconExternal } from './Icons.tsx'
 
 function ignoreRowActivate(event: ReactMouseEvent): boolean {
@@ -56,7 +55,7 @@ export function ItemList({
         const external = row.item.openMode !== 'reader'
         const lab = labLine(row.item)
         const sourceName = !lab && row.source.name !== row.item.author ? row.source.name : null
-        const stub = from === 'read' ? null : excerpt(row.item)
+        const stub = from === 'read' ? null : row.item.excerpt || null
         const inLater = row.state.inLater
         const isRead = row.state.readAt != null
         const open = (children: ReactNode, className?: string) =>
