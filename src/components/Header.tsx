@@ -11,7 +11,30 @@ const NAV = [
   { to: '/sources', label: 'Sources' },
 ] as const
 
+function ElephantMark() {
+  return (
+    <svg
+      className="mark"
+      viewBox="0 0 28 28"
+      width="22"
+      height="22"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.9"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M5 19V13.5C5 9.5 8 7 12.5 7H16.5C19.8 7 22 9.2 22 12.2V16.5C22 18.2 23 19 24.3 19C25 19 25.5 18.5 25.5 17.8" />
+      <path d="M5 19H9V15.5H13.5V19H17.5V14.5" />
+      <path d="M13 10.5C11.2 10.5 10.5 12 10.8 13.8C11.1 15 12.3 15.3 13.5 14.5" />
+      <circle cx="18.2" cy="11.2" r="0.85" fill="currentColor" stroke="none" />
+    </svg>
+  )
+}
+
 function currentPath(pathname: string, from: unknown): string {
+  if (pathname === '/feed' || pathname.startsWith('/feed/')) return '/feed'
   if (!pathname.startsWith('/item')) return pathname
   if (from === 'later') return '/later'
   if (from === 'read') return '/read'
@@ -41,7 +64,8 @@ export function Header() {
     <header className="top">
       <div className="bar">
         <Link to="/feed" className="wordmark">
-          Field
+          <ElephantMark />
+          elephant
         </Link>
         <nav aria-label="Sections">
           {NAV.map((item) => (

@@ -10,7 +10,7 @@ export const COLUMN_WIDTH: Record<ColumnWidth, string> = {
 }
 
 export const defaultPrefs: UserPreferences = {
-  theme: 'light',
+  theme: 'warm',
   fontFamily: 'inter',
   fontSize: 18,
   lineHeight: 1.65,

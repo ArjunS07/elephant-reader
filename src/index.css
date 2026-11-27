@@ -35,8 +35,8 @@ html[data-theme="warm"] {
   --fg: #2f2a22;
   --secondary: #6e6555;
   --muted: #968c7a;
-  --accent: #2b45d8;
-  --accent-hover: #435be8;
+  --accent: #2c429e;
+  --accent-hover: #3f57bd;
   --hover: #ebe1c4;
   --border: #e3d9be;
   color-scheme: light;
@@ -128,11 +128,20 @@ a {
 }
 
 .wordmark {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
   color: var(--accent);
   font-family: "Lora", Georgia, serif;
   font-weight: 600;
   font-size: 1.15rem;
   letter-spacing: -0.02em;
+}
+
+.wordmark .mark {
+  width: 22px;
+  height: 22px;
+  flex: none;
 }
 
 .wordmark:hover {
@@ -285,6 +294,104 @@ input[type="range"]::-moz-range-thumb {
   color: var(--fg);
 }
 
+.daynav {
+  position: relative;
+  display: flex;
+  align-items: baseline;
+  gap: 0.7rem;
+  padding: 0.15rem 0 0.85rem;
+}
+
+.caret,
+.calendar-toggle,
+.day-label,
+.source-link {
+  background: none;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+  font: inherit;
+}
+
+.caret {
+  color: var(--muted);
+  font-size: 1.15rem;
+  line-height: 1;
+}
+
+.caret:disabled {
+  color: var(--border);
+  cursor: default;
+}
+
+.day-label {
+  color: var(--fg);
+  font-family: Inter, system-ui, sans-serif;
+  font-size: 15px;
+}
+
+.calendar-toggle {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.calendar-toggle:hover,
+.caret:hover:not(:disabled),
+.source-link:hover {
+  color: var(--fg);
+}
+
+.calendar {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 25;
+  width: 232px;
+  padding: 0.55rem 0.65rem 0.7rem;
+  background: var(--bg);
+  border: 1px solid var(--border);
+}
+
+.calendar-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0.4rem;
+  font-family: Inter, system-ui, sans-serif;
+  font-size: 13px;
+}
+
+.calendar-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  text-align: center;
+}
+
+.calendar-dow {
+  font-family: Inter, system-ui, sans-serif;
+  font-size: 11px;
+  color: var(--muted);
+  padding: 0.2rem 0;
+}
+
+.calendar-grid button {
+  font-family: Inter, system-ui, sans-serif;
+  font-size: 12px;
+  color: var(--muted);
+  padding: 0.32rem 0;
+  cursor: pointer;
+}
+
+.calendar-grid button[data-has="true"] {
+  color: var(--fg);
+}
+
+.calendar-grid button[aria-current="date"] {
+  font-weight: 500;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
 .filters .sweep button:hover,
 .text-btn:hover,
 .reset:hover {
@@ -349,6 +456,32 @@ input[type="range"]::-moz-range-thumb {
   font-family: "Geist Mono", ui-monospace, monospace;
   font-size: 12px;
   line-height: 1.45;
+}
+
+.attrib,
+.aux {
+  display: block;
+  font-family: Inter, system-ui, sans-serif;
+  font-style: normal;
+}
+
+.attrib {
+  margin-top: 0.22rem;
+  color: var(--secondary);
+  font-size: 13.5px;
+  line-height: 1.4;
+}
+
+.aux {
+  margin-top: 0.12rem;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.source-link {
+  color: inherit;
+  font: inherit;
 }
 
 .excerpt {
@@ -464,6 +597,7 @@ input[type="range"]::-moz-range-thumb {
 
 .source-name {
   font-size: 15px;
+  color: var(--fg);
 }
 
 .source-actions {
@@ -641,11 +775,46 @@ html[data-align="center"] .reader-frame {
   margin: 0.35rem 0;
 }
 
-.reader ul.discussion {
-  list-style: disc;
+.reader-prose {
+  position: relative;
+}
+
+.commentary {
   margin-top: 1.8rem;
-  padding-top: 0.8rem;
-  border-top: 1px solid var(--border);
+}
+
+.commentary-quote {
+  margin: 0 0 1.1rem;
+  padding: 0 0 0 0.9rem;
+  border-left: 2px solid var(--border);
+}
+
+.commentary-text {
+  margin: 0;
+  font-family: inherit;
+  font-style: normal;
+}
+
+.commentary-quote figcaption {
+  margin-top: 0.35rem;
+  font-family: Inter, system-ui, sans-serif;
+  font-style: normal;
+  font-size: 0.82rem;
+  line-height: 1.4;
+}
+
+.commentary-name {
+  font-weight: 500;
+  color: var(--secondary);
+}
+
+.commentary-detail {
+  font-weight: 400;
+  color: var(--muted);
+}
+
+.commentary-detail::before {
+  content: ", ";
 }
 
 .reader .paper-links {
@@ -656,14 +825,6 @@ html[data-align="center"] .reader-frame {
 
 .reader .paper-links a {
   margin-right: 1rem;
-}
-
-.reader .speaker {
-  font-family: "Geist Mono", ui-monospace, monospace;
-  font-style: normal;
-  font-size: 0.72em;
-  color: var(--muted);
-  margin-right: 0.35rem;
 }
 
 .quote-mark {
@@ -678,10 +839,10 @@ html[data-align="center"] .reader-frame {
   padding-left: 0.7rem;
   border-left: 1px solid var(--border);
   color: var(--secondary);
-  font-family: "Newsreader", Georgia, serif;
-  font-style: italic;
-  font-size: 0.95rem;
-  line-height: 1.35;
+  font-family: Inter, system-ui, sans-serif;
+  font-style: normal;
+  font-size: 0.85rem;
+  line-height: 1.5;
   cursor: pointer;
 }
 
@@ -739,12 +900,12 @@ html[data-align="center"] .reader-frame {
 .note-editor textarea {
   width: 100%;
   border: 0;
-  resize: vertical;
+  resize: none;
   background: transparent;
-  font-family: "Newsreader", Georgia, serif;
-  font-style: italic;
-  font-size: 16px;
-  line-height: 1.4;
+  font-family: Inter, system-ui, sans-serif;
+  font-style: normal;
+  font-size: 0.85rem;
+  line-height: 1.5;
   min-height: 4.4rem;
   outline: none;
 }
