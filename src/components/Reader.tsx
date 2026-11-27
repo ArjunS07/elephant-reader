@@ -4,6 +4,7 @@ import { applyHighlights, anchorFromRoot, layoutNotes } from '../lib/highlight.t
 import { useEscape } from '../lib/hotkeys.ts'
 import { useActions } from '../lib/hooks.ts'
 import type { Highlight, Item, OpenMode } from '../types/model.ts'
+import { CommentaryList } from './CommentaryQuote.tsx'
 import { openAction } from '../lib/format.ts'
 
 interface NavItem {
@@ -234,13 +235,23 @@ export const Reader = memo(function Reader({
 
   return (
     <>
-      <article
-        ref={ref}
-        className={item.metadata.kind === 'paper' ? 'reader paper' : 'reader'}
-        onMouseUp={onMouseUp}
-        onClick={onClick}
-        dangerouslySetInnerHTML={{ __html: html }}
-      />
+      <article className={item.metadata.kind === 'paper' ? 'reader paper' : 'reader'}>
+        <div
+          ref={ref}
+          className="reader-prose"
+          onMouseUp={onMouseUp}
+          onClick={onClick}
+          dangerouslySetInnerHTML={{ __html: html }}
+        />
+        {item.metadata.kind === 'paper' ? (
+          <CommentaryList
+            quotes={item.metadata.discussionQuotes.map((quote) => ({
+              text: quote.text,
+              name: quote.speaker,
+            }))}
+          />
+        ) : null}
+      </article>
       {menu ? (
         <div
           className="selection-menu"

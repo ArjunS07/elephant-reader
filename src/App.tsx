@@ -1,5 +1,5 @@
 import { useEffect } from 'react'
-import { Navigate, Route, Routes, useLocation } from 'react-router-dom'
+import { Navigate, Route, Routes } from 'react-router-dom'
 import { Header } from './components/Header.tsx'
 import { FeedView } from './views/FeedView.tsx'
 import { ItemView } from './views/ItemView.tsx'
@@ -8,17 +8,9 @@ import { ReadView } from './views/ReadView.tsx'
 import { SourcesView } from './views/SourcesView.tsx'
 
 export default function App() {
-  const { pathname } = useLocation()
   useEffect(() => {
-    const names: Record<string, string> = {
-      '/feed': 'Feed',
-      '/later': 'Later',
-      '/read': 'Read',
-      '/sources': 'Sources',
-    }
-    const name = pathname.startsWith('/item') ? 'Reader' : (names[pathname] ?? 'Field')
-    document.title = name === 'Field' ? 'Field' : `${name} · Field`
-  }, [pathname])
+    document.title = 'elephant'
+  }, [])
 
   return (
     <>
@@ -26,6 +18,7 @@ export default function App() {
       <Routes>
         <Route path="/" element={<Navigate to="/feed" replace />} />
         <Route path="/feed" element={<FeedView />} />
+        <Route path="/feed/:day" element={<FeedView />} />
         <Route path="/later" element={<LaterView />} />
         <Route path="/read" element={<ReadView />} />
         <Route path="/sources" element={<SourcesView />} />

@@ -57,6 +57,7 @@ export function LaterView() {
           if (cursor === id) setCursor(rows[index + 1]?.item.id ?? rows[index - 1]?.item.id ?? null)
         }}
         onRead={markRead}
+        onSource={(id) => navigate(`/feed?source=${id}`)}
       />
     </main>
   )

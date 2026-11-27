@@ -1,8 +1,39 @@
+import type { Item } from '../types/model.ts'
+
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
+
 export function formatDate(iso: string): string {
   const d = new Date(iso)
   if (Number.isNaN(d.getTime())) return ''
-  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
-  return `${d.getDate()} ${months[d.getMonth()]}`
+  return `${d.getUTCDate()} ${MONTHS[d.getUTCMonth()]}`
+}
+
+export function dayKey(iso: string): string {
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return ''
+  const month = String(d.getUTCMonth() + 1).padStart(2, '0')
+  const day = String(d.getUTCDate()).padStart(2, '0')
+  return `${d.getUTCFullYear()}-${month}-${day}`
+}
+
+export function isDayKey(value: string | undefined): value is string {
+  return Boolean(value && /^\d{4}-\d{2}-\d{2}$/.test(value))
+}
+
+export function shiftDay(key: string, delta: number): string {
+  const [year, month, day] = key.split('-').map(Number)
+  return dayKey(new Date(Date.UTC(year, month - 1, day + delta)).toISOString())
+}
+
+export function formatDayHeading(key: string): string {
+  const [year, month, day] = key.split('-').map(Number)
+  const date = new Date(Date.UTC(year, month - 1, day))
+  return `${WEEKDAYS[date.getUTCDay()]}, ${MONTHS[month - 1]} ${day}`
+}
+
+export function monthLabel(year: number, month: number): string {
+  return `${MONTHS[month - 1]} ${year}`
 }
 
 export function hostname(url: string): string {
@@ -36,6 +67,17 @@ export function openAction(url: string) {
     return
   }
   window.location.href = url
+}
+
+export function auxiliaryParts(item: Item, extras: string[]): string[] {
+  const parts = [...extras.filter(Boolean)]
+  if (item.metadata.kind === 'hn') {
+    parts.push(`${item.metadata.points} pts`, `${item.metadata.commentCount} comments`)
+  }
+  if (item.metadata.kind === 'youtube' || item.metadata.kind === 'podcast') {
+    parts.push(`${item.metadata.durationMin} min`)
+  }
+  return parts
 }
 
 export function readPercent(progress: number): string | null {

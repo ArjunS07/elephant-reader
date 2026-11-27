@@ -27,12 +27,6 @@ export function articleHtml(item: Item, source: Source | undefined): string {
           `<a href="${escapeHtml(link.url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(link.label)}</a>`,
       )
       .join('')
-    const quotes = paper.discussionQuotes
-      .map(
-        (quote) =>
-          `<li><span class="speaker">${escapeHtml(quote.speaker)}</span> ${escapeHtml(quote.text)}</li>`,
-      )
-      .join('')
     return [
       `<h1>${escapeHtml(item.title)}</h1>`,
       `<p class="authors">${escapeHtml(paper.authors.join(', '))}</p>`,
@@ -40,7 +34,6 @@ export function articleHtml(item: Item, source: Source | undefined): string {
       `<p class="byline">${escapeHtml(formatDate(item.publishedAt))}</p>`,
       `<p class="abstract">${escapeHtml(paper.abstract)}</p>`,
       `<p class="paper-links">${links}</p>`,
-      `<ul class="discussion">${quotes}</ul>`,
     ].join('')
   }
 

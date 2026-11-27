@@ -1,4 +1,4 @@
-# Field
+# elephant
 
 A local prototype of a personal reading client. Sources, items, queue state, and highlights live in the browser so the interface and the data model can be tried before a backend exists.
 

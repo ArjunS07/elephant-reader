@@ -1,4 +1,5 @@
 import { useState, type FormEvent } from 'react'
+import { Link } from 'react-router-dom'
 import { IconBookmark, IconCheck } from '../components/Icons.tsx'
 import { useActions, useLibrary } from '../lib/hooks.ts'
 import type { SourceType } from '../types/model.ts'
@@ -61,7 +62,9 @@ export function SourcesView() {
               return (
                 <div key={source.id} className="source">
                   <div className="source-copy">
-                    <div className="source-name">{source.name}</div>
+                    <Link className="source-name" to={`/feed?source=${source.id}`}>
+                      {source.name}
+                    </Link>
                     {detail ? <div className="meta">{detail}</div> : null}
                   </div>
                   <div className="source-actions">

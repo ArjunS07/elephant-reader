@@ -63,6 +63,7 @@ export function ReadView() {
         onLater={saveLater}
         onRemove={removeLater}
         onRead={markRead}
+        onSource={(id) => navigate(`/feed?source=${id}`)}
       />
     </main>
   )
