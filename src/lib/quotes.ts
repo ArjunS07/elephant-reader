@@ -21,6 +21,7 @@ export function quotesOf(item: Item): DiscussionQuote[] {
   if (item.metadata.kind === 'paper') {
     return shared.length ? shared : (item.metadata.discussionQuotes ?? [])
   }
+  if (item.metadata.kind === 'generic') return shared.length ? shared : (item.metadata.discussionQuotes ?? [])
   return shared
 }
 

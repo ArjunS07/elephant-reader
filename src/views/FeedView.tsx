@@ -4,15 +4,17 @@ import { feed } from '../api.ts'
 import { DayNav } from '../components/DayNav.tsx'
 import { ItemList } from '../components/ItemList.tsx'
 import { isDayKey, openAction } from '../lib/format.ts'
+import { feedFilterNames } from '../lib/folders.ts'
 import { useHotkeys } from '../lib/hotkeys.ts'
 import { useActions, useLibrary } from '../lib/hooks.ts'
 import type { FeedResponse, RowModel } from '../types.ts'
 
-const FILTERS = ['All', 'Papers', 'RSS', 'Newsletters', 'HN', 'Podcasts', 'Video', 'Briefings'] as const
-type FeedFilter = (typeof FILTERS)[number]
-
-function asFilter(value: string | null): FeedFilter {
-  return FILTERS.includes(value as FeedFilter) ? (value as FeedFilter) : 'All'
+function asFilter(value: string | null): string {
+  if (!value) return 'All'
+  const trimmed = value.trim()
+  if (!trimmed || trimmed === 'All' || trimmed.length > 48) return 'All'
+  if (!/^[\p{L}\p{N}][\p{L}\p{N} .&+'/-]*$/u.test(trimmed)) return 'All'
+  return trimmed
 }
 
 export function FeedView() {
@@ -69,7 +71,7 @@ export function FeedView() {
     navigate(query ? `/feed/${nextDay}?${query}` : `/feed/${nextDay}`)
   }
 
-  const setFilter = (name: FeedFilter) => {
+  const setFilter = (name: string) => {
     const next = new URLSearchParams(params)
     next.delete('source')
     if (name === 'All') next.delete('folder')
@@ -114,11 +116,15 @@ export function FeedView() {
     },
   })
 
+  const filters = feedFilterNames(sources, rows.map((row) => row.source))
+  const shown = filter !== 'All' && !filters.includes(filter) ? [filters[0] ?? 'All', filter, ...filters.slice(1)] : filters
+  const navReady = Boolean(data && data.day === day)
+
   return (
     <main className="sheet">
       <div className="filters">
         <div className="filter-names">
-          {FILTERS.map((name) => (
+          {shown.map((name) => (
             <button
               key={name}
               type="button"
@@ -156,9 +162,9 @@ export function FeedView() {
       {day ? (
         <DayNav
           day={day}
-          earliest={data?.earliest || day}
-          latest={data?.latest || day}
-          counts={data?.counts ?? {}}
+          prevDay={navReady ? data?.prevDay : null}
+          nextDay={navReady ? data?.nextDay : null}
+          counts={navReady ? (data?.counts ?? {}) : {}}
           onDay={goDay}
         />
       ) : null}

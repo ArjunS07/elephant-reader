@@ -7,7 +7,7 @@ import type { Highlight, Item, OpenMode } from '../types.ts'
 import { CommentaryList } from './CommentaryQuote.tsx'
 import { quotesOf, tractionOf } from '../lib/quotes.ts'
 import { IconExternal } from './Icons.tsx'
-import { isHttpUrl, openAction } from '../lib/format.ts'
+import { isHttpUrl, openAction, safeUrl } from '../lib/format.ts'
 
 interface NavItem {
   id: string
@@ -74,6 +74,7 @@ export const Reader = memo(function Reader({
 
   const listPath = from === 'later' ? '/later' : from === 'read' ? '/read' : '/feed'
   const back = () => navigate(listPath)
+  const original = safeUrl(item.actionUrl)
 
   useEscape(!editor && !menu, back)
   useEscape(Boolean(editor) || Boolean(menu), () => {
@@ -240,15 +241,17 @@ export const Reader = memo(function Reader({
       <article className={item.metadata.kind === 'paper' ? 'reader paper' : 'reader'}>
         <h1 className="piece-title">
           <span>{item.title}</span>
-          <a
-            className="open-original"
-            href={item.actionUrl}
-            title="Open original"
-            aria-label="Open original"
-            {...(isHttpUrl(item.actionUrl) ? { target: '_blank', rel: 'noopener noreferrer' } : {})}
-          >
-            <IconExternal size={23} />
-          </a>
+          {original ? (
+            <a
+              className="open-original"
+              href={original}
+              title="Open original"
+              aria-label="Open original"
+              {...(isHttpUrl(original) ? { target: '_blank', rel: 'noopener noreferrer' } : {})}
+            >
+              <IconExternal size={23} />
+            </a>
+          ) : null}
         </h1>
         <div
           ref={ref}

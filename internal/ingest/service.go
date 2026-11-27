@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -30,6 +31,9 @@ const (
 	syncSourceTimeout = 60 * time.Second
 	catchUpStale      = 60 * time.Minute
 )
+
+// errYouTubeShort tells callers to drop the item. Shorts are not stored.
+var errYouTubeShort = errors.New("skip youtube short")
 
 type SyncOptions struct {
 	MaxItems     int
@@ -61,7 +65,10 @@ func envInt(key string) (int, bool) {
 }
 
 type Service struct {
-	Store   *db.Store
+	Store *db.Store
+	// HTTP fetches feeds. New installs SafeClient.
+	// Tests that point feeds at httptest.NewServer should replace HTTP with a
+	// plain client; the safe dialer rejects loopback and private addresses.
 	HTTP    *http.Client
 	Opts    SyncOptions
 	Backoff func(attempt int) time.Duration
@@ -74,7 +81,7 @@ type Service struct {
 func New(store *db.Store) *Service {
 	return &Service{
 		Store:   store,
-		HTTP:    &http.Client{Timeout: 15 * time.Second},
+		HTTP:    SafeClient(),
 		Opts:    SyncOptionsFromEnv(),
 		Backoff: defaultBackoff,
 		hosts:   newHostGate(hostSlots),
@@ -204,6 +211,9 @@ func (s *Service) Ingest(ctx context.Context, inputs []model.IngestItem) ([]mode
 	prepared := make([]db.PreparedItem, 0, len(inputs))
 	for _, input := range inputs {
 		item, err := s.prepare(input)
+		if errors.Is(err, errYouTubeShort) {
+			continue
+		}
 		if err != nil {
 			return nil, err
 		}
@@ -213,7 +223,9 @@ func (s *Service) Ingest(ctx context.Context, inputs []model.IngestItem) ([]mode
 }
 
 func (s *Service) prepare(input model.IngestItem) (db.PreparedItem, error) {
-	input.CanonicalURL = strings.TrimSpace(input.CanonicalURL)
+	input.CanonicalURL = SanitizeURL(input.CanonicalURL)
+	input.DiscussionURL = SanitizeURL(input.DiscussionURL)
+	input.ActionURL = SanitizeURL(input.ActionURL)
 	input.Title = strings.TrimSpace(input.Title)
 	if input.CanonicalURL == "" || input.Title == "" {
 		return db.PreparedItem{}, fmt.Errorf("title and canonicalUrl are required")
@@ -223,6 +235,9 @@ func (s *Service) prepare(input model.IngestItem) (db.PreparedItem, error) {
 		return db.PreparedItem{}, err
 	}
 	input.SourceID = source.ID
+	if IsYouTubeShort(source, input.CanonicalURL, input.ActionURL, input.Title) {
+		return db.PreparedItem{}, errYouTubeShort
+	}
 	if strings.TrimSpace(input.ExternalID) == "" {
 		input.ExternalID = input.CanonicalURL
 	}
@@ -246,7 +261,7 @@ func (s *Service) prepare(input model.IngestItem) (db.PreparedItem, error) {
 			input.OpenMode = "reader"
 		}
 	}
-	if strings.TrimSpace(input.ActionURL) == "" {
+	if input.ActionURL == "" {
 		input.ActionURL = input.CanonicalURL
 	}
 	meta, err := mergeMetadata(input.Metadata, input.TractionNote, input.DiscussionQuotes)
@@ -290,6 +305,9 @@ func (s *Service) ingestOne(input model.IngestItem) (model.IngestResult, error) 
 	results, err := s.Ingest(context.Background(), []model.IngestItem{input})
 	if err != nil {
 		return model.IngestResult{}, err
+	}
+	if len(results) == 0 {
+		return model.IngestResult{}, errYouTubeShort
 	}
 	return results[0], nil
 }
@@ -570,6 +588,9 @@ func (s *Service) minItems() int {
 }
 
 func (s *Service) getResponse(ctx context.Context, endpoint, etag, modified string) (*http.Response, error) {
+	if err := validateFetchScheme(endpoint); err != nil {
+		return nil, err
+	}
 	release, err := s.gate().acquire(ctx, requestHost(endpoint))
 	if err != nil {
 		return nil, err
@@ -577,7 +598,7 @@ func (s *Service) getResponse(ctx context.Context, endpoint, etag, modified stri
 	defer release()
 	client := s.HTTP
 	if client == nil {
-		client = http.DefaultClient
+		client = SafeClient()
 	}
 	var last error
 	for attempt := 0; attempt < syncAttempts; attempt++ {

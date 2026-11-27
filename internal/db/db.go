@@ -72,7 +72,10 @@ func (s *Store) Migrate() error {
 	if _, err := s.SQL.Exec(`CREATE INDEX IF NOT EXISTS items_source_canonical ON items(source_id, canonical_url)`); err != nil {
 		return err
 	}
-	return s.rebuildFTSOnce()
+	if err := s.rebuildFTSOnce(); err != nil {
+		return err
+	}
+	return s.purgeYouTubeShorts()
 }
 
 // rebuildFTSOnce rewrites items_fts so each row's FTS rowid matches items.rowid.
@@ -118,6 +121,26 @@ func (s *Store) rebuildFTSOnce() error {
 		return fmt.Errorf("rebuild fts: %w", err)
 	}
 	return nil
+}
+
+// purgeYouTubeShorts deletes items whose canonical or action URL is a
+// YouTube Short. items_fts is a standalone table, so those rows are removed
+// by items.rowid. user_item_state and highlights follow items via ON DELETE CASCADE.
+// The statement matches nothing on a clean database and is safe to repeat.
+func (s *Store) purgeYouTubeShorts() error {
+	if _, err := s.SQL.Exec(`PRAGMA foreign_keys=ON`); err != nil {
+		return err
+	}
+	const match = `canonical_url LIKE '%/shorts/%' OR action_url LIKE '%/shorts/%'`
+	return s.withTx(func(tx *sql.Tx) error {
+		if _, err := tx.Exec(`DELETE FROM items_fts WHERE rowid IN (SELECT rowid FROM items WHERE ` + match + `)`); err != nil {
+			return fmt.Errorf("purge youtube shorts fts: %w", err)
+		}
+		if _, err := tx.Exec(`DELETE FROM items WHERE ` + match); err != nil {
+			return fmt.Errorf("purge youtube shorts: %w", err)
+		}
+		return nil
+	})
 }
 
 func (s *Store) addColumn(table, column, decl string) error {

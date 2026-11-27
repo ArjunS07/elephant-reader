@@ -9,23 +9,43 @@ export class ApiError extends Error {
   }
 }
 
-function authToken(): string | undefined {
-  const env = import.meta.env as Record<string, string | undefined>
-  return env.VITE_ELEPHANT_API_TOKEN
+const UNAUTHORIZED = 'elephant-unauthorized'
+
+export function onUnauthorized(listener: () => void): () => void {
+  window.addEventListener(UNAUTHORIZED, listener)
+  return () => window.removeEventListener(UNAUTHORIZED, listener)
+}
+
+export interface SessionStatus {
+  authenticated: boolean
+  authRequired: boolean
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const headers = new Headers(init?.headers)
   const form = typeof FormData !== 'undefined' && init?.body instanceof FormData
   if (init?.body && !form && !headers.has('Content-Type')) headers.set('Content-Type', 'application/json')
-  const token = authToken()
-  if (token) headers.set('Authorization', `Bearer ${token}`)
-  const response = await fetch(path, { ...init, headers })
+  const response = await fetch(path, { ...init, headers, credentials: 'same-origin' })
+  if (response.status === 401 && !path.startsWith('/v1/session')) {
+    window.dispatchEvent(new Event(UNAUTHORIZED))
+  }
   if (response.status === 204) return undefined as T
   const text = await response.text()
   const body = text ? (JSON.parse(text) as { error?: string }) : {}
   if (!response.ok) throw new ApiError(response.status, body.error || response.statusText)
   return body as T
+}
+
+export function getSession(): Promise<SessionStatus> {
+  return request('/v1/session')
+}
+
+export function createSession(passphrase: string): Promise<SessionStatus> {
+  return request('/v1/session', { method: 'POST', body: JSON.stringify({ passphrase }) })
+}
+
+export function deleteSession(): Promise<void> {
+  return request('/v1/session', { method: 'DELETE' })
 }
 
 export function health(): Promise<{ ok: boolean }> {

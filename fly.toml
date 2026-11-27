@@ -1,11 +1,13 @@
 # One Machine only. SQLite lives on the volume, and a second Machine would
 # split that file and spend the Free plan allowance twice:
 #   fly deploy --ha=false
-# Set the bearer token outside the image:
+# Set secrets outside the image. The UI never receives the token.
 #   fly secrets set ELEPHANT_API_TOKEN=...
+#   fly secrets set ELEPHANT_PASSPHRASE=...
 
-app = "elephant"
+app = "elephant-reader-arjun"
 primary_region = "lax"
+kill_timeout = "15s"
 
 [build]
 
@@ -14,6 +16,7 @@ primary_region = "lax"
   STATIC_DIR = "/app/dist"
   DATABASE_PATH = "/data/elephant.db"
   ELEPHANT_TIMEZONE = "America/Los_Angeles"
+  GOMEMLIMIT = "180MiB"
 
 [mounts]
   source = "elephant_data"
@@ -37,3 +40,4 @@ primary_region = "lax"
 [[vm]]
   size = "shared-cpu-1x"
   memory = "256mb"
+  swap_size_mb = 256

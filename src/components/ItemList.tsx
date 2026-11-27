@@ -1,6 +1,6 @@
 import { useEffect, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { auxiliaryParts, formatDate, isHttpUrl, readPercent } from '../lib/format.ts'
+import { auxiliaryParts, formatDate, isHttpUrl, readPercent, safeUrl } from '../lib/format.ts'
 import { labLine } from '../lib/quotes.ts'
 import type { RowModel } from '../types.ts'
 import { IconDiscussion, IconExternal } from './Icons.tsx'
@@ -10,6 +10,35 @@ function ignoreRowActivate(event: ReactMouseEvent): boolean {
   if (target instanceof Element && target.closest('a, button')) return true
   const selection = window.getSelection()
   return Boolean(selection && !selection.isCollapsed && selection.toString().trim())
+}
+
+function isYoutubeRow(row: RowModel): boolean {
+  return row.item.metadata.kind === 'youtube' || row.source.folder === 'Video'
+}
+
+function listExcerpt(row: RowModel, from: ItemListProps['from']): string | null {
+  if (from === 'read' || isYoutubeRow(row)) return null
+  const excerpt = row.item.excerpt?.trim() ?? ''
+  if (!excerpt || excerpt === row.item.title.trim()) return null
+  return excerpt
+}
+
+function TitleBody({ title, children }: { title: string; children?: ReactNode }) {
+  if (!children) return title
+  const trimmed = title.trim()
+  const splitAt = trimmed.lastIndexOf(' ')
+  const head = splitAt > 0 ? `${trimmed.slice(0, splitAt)} ` : ''
+  const tail = splitAt > 0 ? trimmed.slice(splitAt + 1) : trimmed
+  return (
+    <>
+      {head}
+      <span className="title-keep">
+        {tail}
+        {'\u00A0'}
+        {children}
+      </span>
+    </>
+  )
 }
 
 interface ItemListProps {
@@ -54,19 +83,26 @@ export function ItemList({
         const aux = auxiliaryParts(row.item, [dateLabel ?? '', progress ?? ''])
         const external = row.item.openMode !== 'reader'
         const lab = labLine(row.item)
-        const sourceName = !lab && row.source.name !== row.item.author ? row.source.name : null
-        const stub = from === 'read' ? null : row.item.excerpt || null
+        const youtube = isYoutubeRow(row)
+        const channel = row.item.metadata.kind === 'youtube' ? row.item.metadata.channelName.trim() : ''
+        const attribName = youtube ? channel || row.item.author || row.source.name : row.item.author
+        const sourceName = !youtube && !lab && row.source.name !== row.item.author ? row.source.name : null
+        const stub = listExcerpt(row, from)
         const inLater = row.state.inLater
         const isRead = row.state.readAt != null
+        const action = safeUrl(row.item.actionUrl)
+        const discussion = safeUrl(row.item.discussionUrl)
         const open = (children: ReactNode, className?: string) =>
           row.item.openMode === 'reader' ? (
             <Link to={`/item/${row.item.id}`} state={{ from }} className={className}>
               {children}
             </Link>
-          ) : (
-            <a className={className} href={row.item.actionUrl} target="_blank" rel="noopener noreferrer">
+          ) : action ? (
+            <a className={className} href={action} {...(isHttpUrl(action) ? { target: '_blank', rel: 'noopener noreferrer' } : {})}>
               {children}
             </a>
+          ) : (
+            <span className={className}>{children}</span>
           )
         const openItem = (newTab: boolean) => {
           if (row.item.openMode === 'reader') {
@@ -74,11 +110,12 @@ export function ItemList({
             else navigate(`/item/${row.item.id}`, { state: { from } })
             return
           }
-          if (newTab || isHttpUrl(row.item.actionUrl)) {
-            window.open(row.item.actionUrl, '_blank', 'noopener,noreferrer')
+          if (!action) return
+          if (newTab || isHttpUrl(action)) {
+            window.open(action, '_blank', 'noopener,noreferrer')
             return
           }
-          window.location.href = row.item.actionUrl
+          window.location.href = action
         }
         return (
           <li
@@ -103,16 +140,17 @@ export function ItemList({
             <div className="row-main">
               {open(
                 <span className="title">
-                  {row.item.title}
-                  {external ? (
-                    <span className="external" title={row.item.openMode === 'deeplink' ? 'Deeplink' : 'External'}>
-                      <IconExternal />
-                    </span>
-                  ) : null}
+                  <TitleBody title={row.item.title}>
+                    {external ? (
+                      <span className="external" title={row.item.openMode === 'deeplink' ? 'Deeplink' : 'External'}>
+                        <IconExternal />
+                      </span>
+                    ) : null}
+                  </TitleBody>
                 </span>,
               )}
               <span className="attrib">
-                {row.item.author}
+                {attribName}
                 {sourceName ? (
                   <>
                     {' · '}
@@ -153,10 +191,10 @@ export function ItemList({
                     Remove
                   </button>
                 ) : null}
-                {row.item.discussionUrl ? (
+                {discussion ? (
                   <a
                     className="icon-btn"
-                    href={row.item.discussionUrl}
+                    href={discussion}
                     target="_blank"
                     rel="noopener noreferrer"
                     title="Discussion"

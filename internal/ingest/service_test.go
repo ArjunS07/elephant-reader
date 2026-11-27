@@ -41,8 +41,7 @@ func TestSyncCapsRetriesAndHash(t *testing.T) {
 	defer feed.Close()
 
 	store := openSvcDB(t)
-	svc := New(store)
-	svc.Backoff = func(int) time.Duration { return 0 }
+	svc := newTestService(store)
 	svc.Opts = SyncOptions{MaxItems: 25, BackfillDays: 60, MinItems: 5}
 	if _, err := store.InsertSource(model.Source{
 		ID: "src_big", Name: "Big", SourceType: "rss", Folder: "RSS", DefaultOpenMode: "reader", DefaultQueue: "feed",
@@ -179,8 +178,7 @@ func TestBackgroundSyncAndCatchUp(t *testing.T) {
 	}))
 	defer feed.Close()
 	store := openSvcDB(t)
-	svc := New(store)
-	svc.Backoff = func(int) time.Duration { return 0 }
+	svc := newTestService(store)
 	if _, err := store.InsertSource(model.Source{
 		ID: "src", Name: "Held", SourceType: "rss", Folder: "RSS", DefaultOpenMode: "reader", DefaultQueue: "feed",
 		FeedURL: feed.URL, Enabled: true,
@@ -254,7 +252,7 @@ func TestOldCatalogKeepsMinimum(t *testing.T) {
 	}))
 	defer feed.Close()
 	store := openSvcDB(t)
-	svc := New(store)
+	svc := newTestService(store)
 	svc.Opts = SyncOptions{MaxItems: 25, BackfillDays: 60, MinItems: 5}
 	if _, err := store.InsertSource(model.Source{
 		ID: "src_hh", Name: "Hardcore History", SourceType: "podcast", Folder: "Podcasts",
@@ -303,6 +301,15 @@ func waitStatus(t *testing.T, svc *Service) {
 		time.Sleep(10 * time.Millisecond)
 	}
 	t.Fatalf("still running %+v", svc.Status())
+}
+
+// newTestService uses a plain HTTP client. SafeClient refuses the loopback
+// addresses httptest.NewServer listens on.
+func newTestService(store *db.Store) *Service {
+	svc := New(store)
+	svc.HTTP = &http.Client{Timeout: 15 * time.Second}
+	svc.Backoff = func(int) time.Duration { return 0 }
+	return svc
 }
 
 func openSvcDB(t *testing.T) *db.Store {

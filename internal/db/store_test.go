@@ -2,9 +2,7 @@ package db
 
 import (
 	"database/sql"
-	"path/filepath"
 	"testing"
-	"time"
 
 	"elephant/internal/model"
 )
@@ -128,14 +126,4 @@ func TestCanonicalURLIsPerSource(t *testing.T) {
 	if err != nil || len(gone) != 1 || gone[0].Item.ID != second.ID {
 		t.Fatalf("stale fts %+v %v", gone, err)
 	}
-}
-
-func openTestDB(t *testing.T) *Store {
-	t.Helper()
-	store, err := Open(filepath.Join(t.TempDir(), "test.db"), time.UTC)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = store.Close() })
-	return store
 }

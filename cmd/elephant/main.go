@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
@@ -89,22 +90,59 @@ func serve(store *db.Store) error {
 		port = ":" + port
 	}
 	svc := ingest.New(store)
-	handler := api.WithStatic(api.NewWithIngest(store, os.Getenv("ELEPHANT_API_TOKEN"), svc), env("STATIC_DIR", "dist"))
+	handler := api.WithStatic(api.NewOptions(store, api.Options{
+		Token:      os.Getenv("ELEPHANT_API_TOKEN"),
+		Passphrase: os.Getenv("ELEPHANT_PASSPHRASE"),
+		CORSOrigin: os.Getenv("ELEPHANT_CORS_ORIGIN"),
+		Service:    svc,
+	}), env("STATIC_DIR", "dist"))
 	svc.CatchUp()
-	server := &http.Server{Addr: port, Handler: handler}
+	return listen(newHTTPServer(port, handler))
+}
+
+func newHTTPServer(addr string, handler http.Handler) *http.Server {
+	return &http.Server{
+		Addr:              addr,
+		Handler:           handler,
+		ReadHeaderTimeout: 10 * time.Second,
+		IdleTimeout:       60 * time.Second,
+		WriteTimeout:      60 * time.Second,
+	}
+}
+
+func listen(server *http.Server) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	errCh := make(chan error, 1)
 	go func() {
-		<-ctx.Done()
-		shutdown, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		_ = server.Shutdown(shutdown)
+		errCh <- server.ListenAndServe()
 	}()
-	log.Printf("elephant listening on %s", port)
-	if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-		return err
+	log.Printf("elephant listening on %s", server.Addr)
+	select {
+	case err := <-errCh:
+		if err != nil && !errors.Is(err, http.ErrServerClosed) {
+			return err
+		}
+		return nil
+	case <-ctx.Done():
+		// Wait until Shutdown finishes draining. Returning as soon as
+		// ListenAndServe reports ErrServerClosed drops in-flight requests.
+		// The bound stays inside Fly's 15s kill_timeout.
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		shutErr := server.Shutdown(shutdownCtx)
+		if shutErr != nil {
+			_ = server.Close()
+		}
+		listenErr := <-errCh
+		if shutErr != nil {
+			return shutErr
+		}
+		if listenErr != nil && !errors.Is(listenErr, http.ErrServerClosed) {
+			return listenErr
+		}
+		return nil
 	}
-	return nil
 }
 
 func env(key, fallback string) string {
