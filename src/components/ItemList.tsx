@@ -1,6 +1,7 @@
 import { useEffect } from 'react'
 import { Link } from 'react-router-dom'
 import { byline } from '../lib/article.ts'
+import { excerpt } from '../lib/excerpt.ts'
 import { readPercent } from '../lib/format.ts'
 import type { RowModel } from '../lib/select.ts'
 import { IconBookmark, IconCheck, IconClose, IconDiscussion, IconExternal } from './Icons.tsx'
@@ -43,6 +44,7 @@ export function ItemList({
         const progress = showProgress ? readPercent(row.state.readProgress) : null
         const meta = byline(row.item, row.source, date === 'read' ? (row.state.readAt ?? row.item.publishedAt) : row.item.publishedAt)
         const external = row.item.openMode !== 'reader'
+        const stub = from === 'read' ? null : excerpt(row.item)
         const title = (
           <>
             <span className="title">
@@ -59,6 +61,7 @@ export function ItemList({
                 <span title={`${progress} read`}> · {progress}</span>
               ) : null}
             </span>
+            {stub ? <span className="excerpt">{stub}</span> : null}
           </>
         )
         return (

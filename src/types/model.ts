@@ -28,6 +28,8 @@ export type FontFamily = 'inter' | 'lora' | 'newsreader'
 
 export type ColumnWidth = 'narrow' | 'default' | 'wide'
 
+export type ColumnAlign = 'left' | 'center'
+
 export interface Source {
   id: string
   name: string
@@ -129,6 +131,7 @@ export interface UserPreferences {
   fontSize: number
   lineHeight: number
   columnWidth: ColumnWidth
+  align: ColumnAlign
 }
 
 export const FOLDERS = [

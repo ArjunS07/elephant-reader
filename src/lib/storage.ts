@@ -1,4 +1,4 @@
-import type { ColumnWidth, FontFamily, ThemeName, UserPreferences } from '../types/model.ts'
+import type { ColumnAlign, ColumnWidth, FontFamily, ThemeName, UserPreferences } from '../types/model.ts'
 
 export const PREFS_KEY = 'field.prefs'
 export const DATA_KEY = 'field.data.v1'
@@ -15,6 +15,7 @@ export const defaultPrefs: UserPreferences = {
   fontSize: 18,
   lineHeight: 1.65,
   columnWidth: 'default',
+  align: 'left',
 }
 
 function clamp(n: number, min: number, max: number): number {
@@ -39,13 +40,14 @@ export function sanitizePrefs(input: Partial<UserPreferences> | null | undefined
     input?.columnWidth === 'narrow' || input?.columnWidth === 'wide' || input?.columnWidth === 'default'
       ? input.columnWidth
       : defaultPrefs.columnWidth
+  const align: ColumnAlign = input?.align === 'center' || input?.align === 'left' ? input.align : defaultPrefs.align
   const fontSize = clamp(Math.round(numberOr(input?.fontSize, defaultPrefs.fontSize)), 15, 20)
   const lineHeight = clamp(
     Math.round(numberOr(input?.lineHeight, defaultPrefs.lineHeight) * 20) / 20,
     1.5,
     1.85,
   )
-  return { theme, fontFamily, fontSize, lineHeight, columnWidth }
+  return { theme, fontFamily, fontSize, lineHeight, columnWidth, align }
 }
 
 export function applyPrefs(prefs: UserPreferences) {
@@ -55,6 +57,7 @@ export function applyPrefs(prefs: UserPreferences) {
   root.style.setProperty('--reading-size', `${prefs.fontSize}px`)
   root.style.setProperty('--reading-leading', String(prefs.lineHeight))
   root.style.setProperty('--column', COLUMN_WIDTH[prefs.columnWidth])
+  root.dataset.align = prefs.align
   try {
     localStorage.setItem(PREFS_KEY, JSON.stringify(prefs))
   } catch {

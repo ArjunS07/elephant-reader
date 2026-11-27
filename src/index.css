@@ -12,6 +12,7 @@
   --reading-leading: 1.65;
   --column: 672px;
   --reading-font: "Inter", sans-serif;
+  --gutter: clamp(2rem, 8vw, 6.5rem);
   color-scheme: light;
 }
 
@@ -107,13 +108,19 @@ a {
   position: sticky;
   top: 0;
   z-index: 20;
+  background: var(--bg);
+  border-bottom: 1px solid var(--border);
+}
+
+.bar {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 0.35rem 1.1rem;
-  padding: 0.75rem 1.25rem;
-  background: var(--bg);
-  border-bottom: 1px solid var(--border);
+  width: min(720px, calc(100% - var(--gutter) - 1.25rem));
+  margin-left: var(--gutter);
+  margin-right: auto;
+  padding: 0.75rem 0;
 }
 
 .wordmark {
@@ -128,19 +135,19 @@ a {
   color: var(--accent-hover);
 }
 
-.top nav {
+.bar nav {
   display: flex;
   flex-wrap: wrap;
   gap: 0.95rem;
   flex: 1;
 }
 
-.top nav a {
+.bar nav a {
   color: var(--secondary);
   font-size: 14px;
 }
 
-.top nav a[aria-current="page"] {
+.bar nav a[aria-current="page"] {
   color: var(--fg);
 }
 
@@ -239,9 +246,10 @@ input[type="range"]::-moz-range-thumb {
 }
 
 .sheet {
-  width: min(720px, 100%);
-  margin: 0 auto;
-  padding: 0.25rem 1.25rem 4rem;
+  width: min(720px, calc(100% - var(--gutter) - 1.25rem));
+  margin-left: var(--gutter);
+  margin-right: auto;
+  padding: 0.25rem 0 4rem;
 }
 
 .filters {
@@ -328,6 +336,18 @@ input[type="range"]::-moz-range-thumb {
   color: var(--muted);
   font-family: "Geist Mono", ui-monospace, monospace;
   font-size: 12px;
+  line-height: 1.45;
+}
+
+.excerpt {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+  margin-top: 0.28rem;
+  color: var(--secondary);
+  font-size: 14px;
   line-height: 1.45;
 }
 
@@ -469,9 +489,17 @@ input[type="range"]::-moz-range-thumb {
 }
 
 .reader-frame {
-  width: min(100%, calc(var(--column) + 2.5rem));
-  margin: 0 auto;
-  padding: 2.1rem 1.25rem 6.5rem;
+  width: min(calc(100% - var(--gutter) - 1.25rem), calc(var(--column) + 1.25rem));
+  margin-left: var(--gutter);
+  margin-right: auto;
+  padding: 2.1rem 0 6.5rem;
+}
+
+html[data-align="center"] .bar,
+html[data-align="center"] .sheet,
+html[data-align="center"] .reader-frame {
+  margin-left: auto;
+  margin-right: auto;
 }
 
 .reader {
@@ -630,7 +658,7 @@ input[type="range"]::-moz-range-thumb {
 
 @media (min-width: 1120px) {
   .reader-frame {
-    width: min(100%, calc(var(--column) + 280px + 2.5rem));
+    width: min(calc(100% - var(--gutter) - 1.25rem), calc(var(--column) + 280px + 1.25rem));
   }
 
   .reader {
@@ -722,10 +750,13 @@ input[type="range"]::-moz-range-thumb {
   border-top: 1px solid var(--border);
 }
 
-@media (max-width: 640px) {
+@media (max-width: 720px) {
+  .bar,
   .sheet,
-  .reader-frame,
-  .top {
+  .reader-frame {
+    width: auto;
+    margin-left: 0;
+    margin-right: 0;
     padding-left: 1rem;
     padding-right: 1rem;
   }

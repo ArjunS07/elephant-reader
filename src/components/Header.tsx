@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { Link, useLocation } from 'react-router-dom'
 import { useEscape } from '../lib/hotkeys.ts'
 import { useActions, useLibrary } from '../lib/hooks.ts'
-import type { ColumnWidth, FontFamily, ThemeName } from '../types/model.ts'
+import type { ColumnAlign, ColumnWidth, FontFamily, ThemeName } from '../types/model.ts'
 
 const NAV = [
   { to: '/feed', label: 'Feed' },
@@ -39,28 +39,30 @@ export function Header() {
 
   return (
     <header className="top">
-      <Link to="/feed" className="wordmark">
-        Field
-      </Link>
-      <nav aria-label="Sections">
-        {NAV.map((item) => (
-          <Link key={item.to} to={item.to} aria-current={current === item.to ? 'page' : undefined}>
-            {item.label}
-          </Link>
-        ))}
-      </nav>
-      <div className="settings-anchor" ref={panel}>
-        <button
-          type="button"
-          className="aa"
-          aria-label="Reading settings"
-          aria-expanded={open}
-          aria-haspopup="dialog"
-          onClick={() => setOpen((value) => !value)}
-        >
-          Aa
-        </button>
-        {open ? <Settings /> : null}
+      <div className="bar">
+        <Link to="/feed" className="wordmark">
+          Field
+        </Link>
+        <nav aria-label="Sections">
+          {NAV.map((item) => (
+            <Link key={item.to} to={item.to} aria-current={current === item.to ? 'page' : undefined}>
+              {item.label}
+            </Link>
+          ))}
+        </nav>
+        <div className="settings-anchor" ref={panel}>
+          <button
+            type="button"
+            className="aa"
+            aria-label="Reading settings"
+            aria-expanded={open}
+            aria-haspopup="dialog"
+            onClick={() => setOpen((value) => !value)}
+          >
+            Aa
+          </button>
+          {open ? <Settings /> : null}
+        </div>
       </div>
     </header>
   )
@@ -133,6 +135,21 @@ function Settings() {
         />
         <span className="slider-value">{prefs.lineHeight.toFixed(2)}</span>
       </label>
+      <div className="setting">
+        <span>Align</span>
+        <div className="choices">
+          {(['left', 'center'] as ColumnAlign[]).map((align) => (
+            <button
+              key={align}
+              type="button"
+              aria-pressed={prefs.align === align}
+              onClick={() => setPrefs({ align })}
+            >
+              {align === 'left' ? 'Left' : 'Center'}
+            </button>
+          ))}
+        </div>
+      </div>
       <div className="setting">
         <span>Width</span>
         <div className="choices">

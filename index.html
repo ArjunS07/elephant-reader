@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en" data-theme="light" data-font="inter">
+<html lang="en" data-theme="light" data-font="inter" data-align="left">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -29,6 +29,7 @@
           if (leading >= 1.5 && leading <= 1.85) root.style.setProperty('--reading-leading', String(leading))
           var cols = { narrow: '600px', default: '672px', wide: '760px' }
           if (cols[p.columnWidth]) root.style.setProperty('--column', cols[p.columnWidth])
+          if (p.align === 'left' || p.align === 'center') root.setAttribute('data-align', p.align)
         } catch (e) {}
       })()
     </script>
