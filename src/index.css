@@ -388,12 +388,33 @@ input[type="range"]::-moz-range-thumb {
   cursor: pointer;
 }
 
-.calendar-grid button[data-has="true"] {
-  color: var(--fg);
+.calendar-grid button[data-bucket="0"] {
+  color: var(--muted);
+  font-weight: 400;
+  background: transparent;
+}
+
+.calendar-grid button[data-bucket="1"] {
+  color: color-mix(in srgb, var(--ink) 55%, transparent);
+  font-weight: 400;
+  background: color-mix(in srgb, var(--ink) 5%, transparent);
+}
+
+.calendar-grid button[data-bucket="2"] {
+  color: color-mix(in srgb, var(--ink) 78%, transparent);
+  font-weight: 500;
+  background: color-mix(in srgb, var(--ink) 8%, transparent);
+}
+
+.calendar-grid button[data-bucket="3"] {
+  color: var(--ink);
+  font-weight: 650;
+  background: color-mix(in srgb, var(--ink) 12%, transparent);
 }
 
 .calendar-grid button[aria-current="date"] {
-  font-weight: 500;
+  color: var(--ink);
+  font-weight: 650;
   text-decoration: underline;
   text-underline-offset: 3px;
 }
@@ -411,6 +432,8 @@ input[type="range"]::-moz-range-thumb {
 }
 
 .row {
+  position: relative;
+  cursor: pointer;
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   gap: 0.35rem 0.75rem;
@@ -504,6 +527,14 @@ input[type="range"]::-moz-range-thumb {
 
 .missing {
   padding-top: 1.5rem;
+}
+
+.actions,
+.source-link,
+.text-action,
+.icon-btn {
+  position: relative;
+  z-index: 1;
 }
 
 .actions {
@@ -864,8 +895,65 @@ html[data-align="center"] .reader-frame {
   color: var(--muted);
 }
 
-.commentary-detail::before {
-  content: ", ";
+.commentary-detail::before,
+.commentary-cue::before {
+  content: " · ";
+}
+
+.commentary-cue {
+  color: var(--muted);
+  font-weight: 400;
+}
+
+.commentary-replies {
+  margin: 0.7rem 0 0 0.15rem;
+}
+
+.commentary-reply {
+  margin: 0.7rem 0 0;
+  padding-left: 0.75rem;
+  border-left: 2px solid var(--border);
+}
+
+.commentary-meta {
+  margin: 0.28rem 0 0;
+  font-family: Inter, system-ui, sans-serif;
+  font-size: 0.82rem;
+  color: var(--muted);
+}
+
+.reader .commentary-meta a,
+.reader .commentary-meta a:link,
+.reader .commentary-meta a:visited {
+  color: var(--muted);
+  font-family: Inter, system-ui, sans-serif;
+  font-style: normal;
+  text-decoration: underline;
+  text-decoration-color: var(--border);
+  text-underline-offset: 2px;
+}
+
+.reader .commentary-meta a:hover {
+  color: var(--ink);
+  text-decoration-color: var(--ink);
+}
+
+.lab {
+  display: block;
+  margin-top: 0.08rem;
+  color: var(--secondary);
+  font-family: Inter, system-ui, sans-serif;
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.traction-note {
+  margin: 1.15rem 0 0;
+  color: var(--muted);
+  font-family: Inter, system-ui, sans-serif;
+  font-size: 0.85rem;
+  font-style: normal;
+  line-height: 1.45;
 }
 
 .reader .paper-links {

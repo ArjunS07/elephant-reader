@@ -3,6 +3,15 @@ import { formatDayHeading, monthLabel, shiftDay } from '../lib/format.ts'
 
 const WEEK = ['S', 'M', 'T', 'W', 'T', 'F', 'S']
 
+function volumeBucket(count: number, max: number): 0 | 1 | 2 | 3 {
+  if (count <= 0 || max <= 0) return 0
+  if (max === 1) return 1
+  const ratio = count / max
+  if (ratio < 0.4) return 1
+  if (ratio < 0.75) return 2
+  return 3
+}
+
 function cellsFor(year: number, month: number): Array<number | null> {
   const first = new Date(Date.UTC(year, month - 1, 1)).getUTCDay()
   const count = new Date(Date.UTC(year, month, 0)).getUTCDate()
@@ -16,13 +25,13 @@ export function DayNav({
   day,
   earliest,
   latest,
-  marked,
+  counts,
   onDay,
 }: {
   day: string
   earliest: string
   latest: string
-  marked: Set<string>
+  counts: Record<string, number>
   onDay: (day: string) => void
 }) {
   const [open, setOpen] = useState(false)
@@ -81,6 +90,7 @@ export function DayNav({
   }, [open, cursor])
 
   const cells = cellsFor(cursor.year, cursor.month)
+  const maxCount = Math.max(0, ...Object.values(counts))
 
   return (
     <div className="daynav" ref={root}>
@@ -150,11 +160,13 @@ export function DayNav({
             {cells.map((value, index) => {
               if (!value) return <span key={`empty-${index}`} />
               const key = `${cursor.year}-${String(cursor.month).padStart(2, '0')}-${String(value).padStart(2, '0')}`
+              const count = counts[key] ?? 0
               return (
                 <button
                   key={key}
                   type="button"
-                  data-has={marked.has(key) ? 'true' : 'false'}
+                  data-bucket={volumeBucket(count, maxCount)}
+                  title={count === 1 ? '1 item' : `${count} items`}
                   aria-current={key === day ? 'date' : undefined}
                   onClick={() => {
                     onDay(key)

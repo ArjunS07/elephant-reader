@@ -1,4 +1,5 @@
 import type { FolderFilter, Highlight, Item, Source, UserItemState } from '../types/model.ts'
+import { quoteSearchChunks, quotesOf, tractionOf } from './quotes.ts'
 
 export interface Library {
   sources: Source[]
@@ -52,14 +53,16 @@ export function rowsFor(library: Library, mode: 'feed' | 'later' | 'read', folde
 export function matchesQuery(item: Item, highlights: Highlight[], query: string): boolean {
   const needle = query.trim().toLowerCase()
   if (!needle) return true
-  const chunks: string[] = [item.title, item.author, item.plainText, item.contentMarkdown ?? '']
+  const chunks: string[] = [item.title, item.author, item.plainText, item.contentMarkdown ?? '', tractionOf(item) ?? '']
+  chunks.push(...quoteSearchChunks(quotesOf(item)))
   if (item.metadata.kind === 'paper') {
     chunks.push(
       item.metadata.abstract,
       item.metadata.authors.join(' '),
       item.metadata.affiliations.join(' '),
-      item.metadata.arxivId,
-      ...item.metadata.discussionQuotes.map((quote) => `${quote.speaker} ${quote.text}`),
+      item.metadata.venue ?? '',
+      item.metadata.arxivId ?? '',
+      item.metadata.tractionNote ?? '',
     )
   }
   if (item.metadata.kind === 'podcast') chunks.push(item.metadata.showName)

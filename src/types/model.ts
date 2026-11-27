@@ -45,17 +45,31 @@ export interface PaperLink {
   url: string
 }
 
-export interface DiscussionQuote {
-  speaker: string
+export type QuoteKind = 'announcement' | 'qt' | 'reply' | 'self-reply'
+
+export interface QuoteReply {
   text: string
   url?: string
+  traction?: string
+}
+
+export interface DiscussionQuote {
+  speaker: string
+  affiliation?: string
+  text: string
+  url?: string
+  kind?: QuoteKind
+  traction?: string
+  replies?: QuoteReply[]
 }
 
 export interface PaperMetadata {
   kind: 'paper'
   authors: string[]
   affiliations: string[]
-  arxivId: string
+  arxivId?: string
+  venue?: string
+  tractionNote?: string
   abstract: string
   links: PaperLink[]
   discussionQuotes: DiscussionQuote[]
@@ -103,6 +117,8 @@ export interface Item {
   actionUrl: string
   contentMarkdown?: string
   plainText: string
+  tractionNote?: string
+  discussionQuotes?: DiscussionQuote[]
   metadata: ItemMetadata
 }
 

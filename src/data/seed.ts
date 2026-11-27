@@ -299,6 +299,7 @@ const items: Item[] = [
       authors: ['Lena Voss', 'Rafael Ito', 'Priya Raman'],
       affiliations: ['MIT CSAIL', 'ETH Zurich'],
       arxivId: '2511.18421',
+      venue: 'CoRL 2026',
       abstract: tactileAbstract,
       links: [
         { label: 'arXiv', url: 'https://arxiv.org/abs/2511.18421' },
@@ -310,16 +311,30 @@ const items: Item[] = [
           speaker: 'Lena Voss',
           text: 'The friction cone is read out of the same latent the planner searches, so the plan and the safety check cannot disagree about the state.',
           url: 'https://x.com/lenavoss/status/1859231842100040101',
+          kind: 'announcement',
+          traction: '5.1k likes, 4.5k bookmarks',
+          replies: [
+            {
+              text: 'The dataset link is in the reply. Insertion is the split that moves the most.',
+              url: 'https://x.com/lenavoss/status/1859231900100040102',
+              traction: '144 likes',
+            },
+          ],
         },
         {
           speaker: 'Rafael Ito',
           text: 'Most of the win shows up when the fingers hide the socket. Vision-only models hallucinate a clean insertion because the last frame looked fine.',
           url: 'https://x.com/rafaelito/status/1859234418821108842',
+          kind: 'qt',
+          traction: '860 likes',
         },
         {
-          speaker: 'Priya Raman',
+          speaker: 'Chris Patel',
           text: 'We still fail on soft cloth when the contact patch is larger than the sensor. That is a sensor problem as much as a model problem.',
-          url: 'https://x.com/priyaraman/status/1859237022194402290',
+          url: 'https://x.com/chrispatel/status/1859237022194402290',
+          affiliation: 'Toyota Research Institute',
+          kind: 'reply',
+          traction: '210 likes',
         },
       ],
     },
@@ -381,29 +396,15 @@ const items: Item[] = [
       authors: ['Anika Shah', 'Tom Berger', 'Hanae Ito'],
       affiliations: ['University of Washington', 'Northline Systems'],
       arxivId: '2510.22108',
+      venue: 'ICLR 2027',
+      tractionNote: '85 likes, RTed by Sophie Wang and Chelsea Finn',
       abstract: splitAbstract,
       links: [
         { label: 'arXiv', url: 'https://arxiv.org/abs/2510.22108' },
         { label: 'Project', url: 'https://northline.example/split-route' },
         { label: 'Announcement', url: 'https://northline.example/blog/split-route' },
       ],
-      discussionQuotes: [
-        {
-          speaker: 'Anika Shah',
-          text: 'Colocation looks simpler until you price the idle memory on a prefill-sized GPU that is now emitting one token at a time.',
-          url: 'https://x.com/anikashah/status/1864412201188032201',
-        },
-        {
-          speaker: 'Tom Berger',
-          text: 'The KV cache does not move. Once we moved caches we recreated the latency problem we were trying to leave behind.',
-          url: 'https://x.com/tomberger/status/1864415803341190044',
-        },
-        {
-          speaker: 'Hanae Ito',
-          text: 'Expert heat is stable over minutes and noisy over milliseconds. The scheduler should be almost bored.',
-          url: 'https://x.com/hanaeito/status/1864419022284417760',
-        },
-      ],
+      discussionQuotes: [],
     },
   },
   {
@@ -575,6 +576,163 @@ const items: Item[] = [
       'Seven ideals for software that keeps the device as the source of truth, including the ability to work offline and to keep data under the owner.',
     metadata: { kind: 'generic' },
   },
+  {
+    id: 'item_plato',
+    sourceId: 'src_papers',
+    externalId: 'platos-key',
+    canonicalUrl: 'https://hazy.example/platos-key',
+    title: "Plato's Key: a small benchmark for grounded tool use",
+    author: 'Ellison, Park',
+    publishedAt: '2026-11-26T08:00:00.000Z',
+    openMode: 'reader',
+    actionUrl: 'https://hazy.example/platos-key',
+    plainText:
+      'A lab blog release of a compact benchmark for tools that have to stay grounded in a scene. No preprint. The post is the paper.',
+    metadata: {
+      kind: 'paper',
+      authors: ['Mara Ellison', 'Theo Park'],
+      affiliations: ['Stanford, Hazy Research'],
+      abstract:
+        'Plato\'s Key is a small public benchmark for language models that call tools while staying grounded in a visible scene. We release the tasks, a short scoring note, and a reference runner from the lab blog. There is no preprint. The post is the paper. The point is to see whether a model notices when a tool result contradicts the picture, not whether it can recite a longer exam.',
+      links: [
+        { label: 'Blog', url: 'https://hazy.example/platos-key' },
+        { label: 'Code', url: 'https://hazy.example/platos-key/code' },
+      ],
+      discussionQuotes: [
+        {
+          speaker: 'Mara Ellison',
+          text: 'We skipped the preprint on purpose. If the blog cannot stand alone, the benchmark is not ready.',
+          url: 'https://x.com/maraellison/status/1862201100452201101',
+          kind: 'announcement',
+          traction: '640 likes',
+        },
+        {
+          speaker: 'Chris Patel',
+          text: 'The contradiction tasks are the ones I would actually assign. The rest is warmup.',
+          url: 'https://x.com/chrispatel/status/1862204402193304410',
+          affiliation: 'Toyota Research Institute',
+          kind: 'reply',
+          traction: '96 likes',
+        },
+      ],
+    },
+  },
+  {
+    id: 'item_hotweek',
+    sourceId: 'src_mlnews',
+    externalId: 'digest-hot-week',
+    canonicalUrl: 'https://digest.example/news/sparse-week',
+    title: 'Sparse releases, one noisy week',
+    author: 'ML Digest',
+    publishedAt: '2026-11-26T17:30:00.000Z',
+    openMode: 'reader',
+    actionUrl: 'https://digest.example/news/sparse-week',
+    contentMarkdown: `Three open sparse models landed within two days. The scores moved a little. The routing notes moved more.
+
+The cluster is not a leaderboard story. It is a serving story: which experts wake on proofs, which stay cold, and who is willing to say the checkpoint is unsure.`,
+    plainText:
+      'Three open sparse models landed within two days. The scores moved a little. The routing notes moved more.',
+    tractionNote: '5.1k likes, 4.5k bookmarks · RTed by Sophie Wang',
+    discussionQuotes: [
+      {
+        speaker: 'Sophie Wang',
+        text: 'Read the routing appendix before the chart. The chart is last week\'s number.',
+        url: 'https://x.com/sophiewang/status/1862301002288110001',
+        kind: 'qt',
+        traction: '5.1k likes, 4.5k bookmarks',
+        replies: [
+          {
+            text: 'The unsure token is the part I want copied into every release note.',
+            url: 'https://x.com/sophiewang/status/1862301002288110002',
+            traction: '220 likes',
+          },
+        ],
+      },
+      {
+        speaker: 'Chris Patel',
+        text: 'Two of the three still hide expert heat. That is the tell.',
+        url: 'https://x.com/chrispatel/status/1862305501188220003',
+        affiliation: 'Toyota Research Institute',
+        kind: 'reply',
+        traction: '180 likes',
+      },
+    ],
+    metadata: { kind: 'generic' },
+  },
+  {
+    id: 'item_opinion',
+    sourceId: 'src_mlnews',
+    externalId: 'digest-last-centimeter',
+    canonicalUrl: 'https://digest.example/opinions/last-centimeter',
+    title: 'The last centimeter is still the whole problem',
+    author: 'Sophie Wang',
+    publishedAt: '2026-11-25T19:00:00.000Z',
+    openMode: 'reader',
+    actionUrl: 'https://digest.example/opinions/last-centimeter',
+    contentMarkdown: `World models got prettier this month. Contact did not get easier.
+
+A plan that looks right until the fingers close is still a video. The opinion is narrow: score the slip, not the caption.`,
+    plainText: 'World models got prettier this month. Contact did not get easier. Score the slip, not the caption.',
+    discussionQuotes: [
+      {
+        speaker: 'Sophie Wang',
+        text: 'If the demo ends before contact, it is not evidence. It is a trailer.',
+        url: 'https://x.com/sophiewang/status/1861802200455100101',
+        kind: 'announcement',
+        traction: '2.4k likes',
+        replies: [
+          {
+            text: 'I would take one failure table over another graceful grasp.',
+            url: 'https://x.com/sophiewang/status/1861802200455100102',
+            traction: '310 likes',
+          },
+        ],
+      },
+      {
+        speaker: 'Chelsea Finn',
+        text: 'Agree on the score. The last centimeter is where the representation either exists or it does not.',
+        url: 'https://x.com/chelseafinn/status/1861806602199004411',
+        kind: 'reply',
+        traction: '1.1k likes',
+      },
+    ],
+    metadata: { kind: 'generic' },
+  },
+  {
+    id: 'item_fellows',
+    sourceId: 'src_mlnews',
+    externalId: 'digest-hazy-fellows',
+    canonicalUrl: 'https://hazy.example/fellows/winter',
+    title: 'Winter fellows at Hazy Research',
+    author: 'Hazy Research',
+    publishedAt: '2026-11-24T18:00:00.000Z',
+    openMode: 'reader',
+    actionUrl: 'https://hazy.example/fellows/winter',
+    contentMarkdown: `A short research fellowship for people who want to sit with one benchmark until it is honest.
+
+The note is practical: three months, a lab desk, and a writeup that can stand without a slide.`,
+    plainText:
+      'A short research fellowship for people who want to sit with one benchmark until it is honest. Three months, a lab desk, and a writeup.',
+    tractionNote: '420 likes, RTed by Sophie Wang',
+    discussionQuotes: [
+      {
+        speaker: 'Theo Park',
+        text: 'We are hiring fellows who would rather delete a task than decorate it.',
+        url: 'https://x.com/theopark/status/1860901102288001101',
+        kind: 'announcement',
+        traction: '420 likes',
+      },
+      {
+        speaker: 'Nora Feldman',
+        text: 'If you are between a lab and a first paper, this is the useful version of that gap.',
+        url: 'https://x.com/norafeldman/status/1860905501199002202',
+        affiliation: 'Independent',
+        kind: 'reply',
+        traction: '88 likes',
+      },
+    ],
+    metadata: { kind: 'generic' },
+  },
 ]
 
 const states: Record<string, UserItemState> = {
@@ -593,6 +751,10 @@ const states: Record<string, UserItemState> = {
   item_contact: unread(),
   item_wiki: unread(),
   item_localfirst: { inLater: false, savedAt: null, readAt: '2026-11-25T18:12:00.000Z', readProgress: 1 },
+  item_plato: unread(),
+  item_hotweek: unread(),
+  item_opinion: unread(),
+  item_fellows: unread(),
 }
 
 const highlights: Highlight[] = [

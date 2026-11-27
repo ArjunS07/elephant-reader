@@ -29,7 +29,7 @@ export function articleHtml(item: Item, source: Source | undefined): string {
       .join('')
     return [
       `<p class="authors">${escapeHtml(paper.authors.join(', '))}</p>`,
-      `<p class="affiliations">${escapeHtml(paper.affiliations.join(' · '))}</p>`,
+      `<p class="affiliations">${escapeHtml([...paper.affiliations, paper.venue].filter(Boolean).join(' · '))}</p>`,
       `<p class="byline">${escapeHtml(formatDate(item.publishedAt))}</p>`,
       `<p class="abstract">${escapeHtml(paper.abstract)}</p>`,
       `<p class="paper-links">${links}</p>`,

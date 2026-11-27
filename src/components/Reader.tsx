@@ -5,6 +5,7 @@ import { useEscape } from '../lib/hotkeys.ts'
 import { useActions } from '../lib/hooks.ts'
 import type { Highlight, Item, OpenMode } from '../types/model.ts'
 import { CommentaryList } from './CommentaryQuote.tsx'
+import { quotesOf, tractionOf } from '../lib/quotes.ts'
 import { IconExternal } from './Icons.tsx'
 import { isHttpUrl, openAction } from '../lib/format.ts'
 
@@ -256,15 +257,8 @@ export const Reader = memo(function Reader({
           onClick={onClick}
           dangerouslySetInnerHTML={{ __html: html }}
         />
-        {item.metadata.kind === 'paper' ? (
-          <CommentaryList
-            quotes={item.metadata.discussionQuotes.map((quote) => ({
-              text: quote.text,
-              name: quote.speaker,
-              href: quote.url,
-            }))}
-          />
-        ) : null}
+        {tractionOf(item) ? <p className="traction-note">{tractionOf(item)}</p> : null}
+        <CommentaryList quotes={quotesOf(item)} />
       </article>
       {menu ? (
         <div

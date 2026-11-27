@@ -1,9 +1,17 @@
-import { useEffect, type ReactNode } from 'react'
-import { Link } from 'react-router-dom'
+import { useEffect, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react'
+import { Link, useNavigate } from 'react-router-dom'
 import { excerpt } from '../lib/excerpt.ts'
-import { auxiliaryParts, formatDate, readPercent } from '../lib/format.ts'
+import { auxiliaryParts, formatDate, isHttpUrl, readPercent } from '../lib/format.ts'
+import { labLine } from '../lib/quotes.ts'
 import type { RowModel } from '../lib/select.ts'
 import { IconDiscussion, IconExternal } from './Icons.tsx'
+
+function ignoreRowActivate(event: ReactMouseEvent): boolean {
+  const target = event.target
+  if (target instanceof Element && target.closest('a, button')) return true
+  const selection = window.getSelection()
+  return Boolean(selection && !selection.isCollapsed && selection.toString().trim())
+}
 
 interface ItemListProps {
   rows: RowModel[]
@@ -30,6 +38,7 @@ export function ItemList({
   onRead,
   onSource,
 }: ItemListProps) {
+  const navigate = useNavigate()
   useEffect(() => {
     if (!activeId) return
     document.querySelector<HTMLElement>(`[data-item-id="${CSS.escape(activeId)}"]`)?.scrollIntoView({ block: 'nearest' })
@@ -45,7 +54,8 @@ export function ItemList({
             : formatDate(date === 'read' ? (row.state.readAt ?? row.item.publishedAt) : row.item.publishedAt)
         const aux = auxiliaryParts(row.item, [dateLabel ?? '', progress ?? ''])
         const external = row.item.openMode !== 'reader'
-        const sourceName = row.source.name !== row.item.author ? row.source.name : null
+        const lab = labLine(row.item)
+        const sourceName = !lab && row.source.name !== row.item.author ? row.source.name : null
         const stub = from === 'read' ? null : excerpt(row.item)
         const inLater = row.state.inLater
         const isRead = row.state.readAt != null
@@ -59,6 +69,18 @@ export function ItemList({
               {children}
             </a>
           )
+        const openItem = (newTab: boolean) => {
+          if (row.item.openMode === 'reader') {
+            if (newTab) window.open(`/item/${row.item.id}`, '_blank', 'noopener')
+            else navigate(`/item/${row.item.id}`, { state: { from } })
+            return
+          }
+          if (newTab || isHttpUrl(row.item.actionUrl)) {
+            window.open(row.item.actionUrl, '_blank', 'noopener,noreferrer')
+            return
+          }
+          window.location.href = row.item.actionUrl
+        }
         return (
           <li
             key={row.item.id}
@@ -68,6 +90,16 @@ export function ItemList({
             data-read={isRead ? 'true' : 'false'}
             data-later={inLater ? 'true' : 'false'}
             onMouseEnter={() => onActive(row.item.id)}
+            onClick={(event) => {
+              if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return
+              if (ignoreRowActivate(event)) return
+              openItem(false)
+            }}
+            onAuxClick={(event) => {
+              if (event.button !== 1 || ignoreRowActivate(event)) return
+              event.preventDefault()
+              openItem(true)
+            }}
           >
             <div className="row-main">
               {open(
@@ -95,6 +127,7 @@ export function ItemList({
                   </>
                 ) : null}
               </span>
+              {lab ? <span className="lab">{lab}</span> : null}
               {aux.length ? <span className="aux">{aux.join(' · ')}</span> : null}
               {stub ? open(<span className="excerpt">{stub}</span>) : null}
             </div>

@@ -36,7 +36,16 @@ export function FeedView() {
     () => rows.filter((row) => matchesFilter(row.source, filter, sourceId)),
     [rows, filter, sourceId],
   )
-  const days = useMemo(() => [...new Set(scoped.map((row) => dayKey(row.item.publishedAt)).filter(Boolean))].sort(), [scoped])
+  const counts = useMemo(() => {
+    const map: Record<string, number> = {}
+    for (const row of scoped) {
+      const key = dayKey(row.item.publishedAt)
+      if (!key) continue
+      map[key] = (map[key] ?? 0) + 1
+    }
+    return map
+  }, [scoped])
+  const days = Object.keys(counts).sort()
   const latest = days.at(-1) ?? ''
   const earliest = days[0] ?? latest
   const day = isDayKey(dayParam) ? dayParam : latest
@@ -136,7 +145,7 @@ export function FeedView() {
           day={day}
           earliest={earliest || day}
           latest={latest || day}
-          marked={new Set(days)}
+          counts={counts}
           onDay={goDay}
         />
       ) : null}

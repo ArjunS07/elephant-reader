@@ -1,4 +1,5 @@
 import type { Item } from '../types/model.ts'
+import { quotesOf, tractionOf } from './quotes.ts'
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
 const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
@@ -76,6 +77,13 @@ export function auxiliaryParts(item: Item, extras: string[]): string[] {
   }
   if (item.metadata.kind === 'youtube' || item.metadata.kind === 'podcast') {
     parts.push(`${item.metadata.durationMin} min`)
+  }
+  const traction = tractionOf(item)
+  if (traction) parts.push(traction)
+  else {
+    const quotes = quotesOf(item).length
+    if (quotes === 1) parts.push('1 quote')
+    else if (quotes > 1) parts.push(`${quotes} quotes`)
   }
   return parts
 }
