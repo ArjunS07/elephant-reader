@@ -24,6 +24,7 @@ function spaFallback(): Plugin {
 }
 
 export default defineConfig({
+  base: '/',
   appType: 'spa',
   plugins: [react(), spaFallback()],
   server: {
