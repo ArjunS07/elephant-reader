@@ -28,7 +28,6 @@ export function articleHtml(item: Item, source: Source | undefined): string {
       )
       .join('')
     return [
-      `<h1>${escapeHtml(item.title)}</h1>`,
       `<p class="authors">${escapeHtml(paper.authors.join(', '))}</p>`,
       `<p class="affiliations">${escapeHtml(paper.affiliations.join(' · '))}</p>`,
       `<p class="byline">${escapeHtml(formatDate(item.publishedAt))}</p>`,
@@ -42,5 +41,5 @@ export function articleHtml(item: Item, source: Source | undefined): string {
     : item.plainText
       ? `<p>${escapeHtml(item.plainText)}</p>`
       : ''
-  return `<h1>${escapeHtml(item.title)}</h1><p class="byline">${escapeHtml(byline(item, source))}</p>${body}`
+  return `<p class="byline">${escapeHtml(byline(item, source))}</p>${body}`
 }

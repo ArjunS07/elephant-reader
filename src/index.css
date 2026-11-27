@@ -694,6 +694,26 @@ html[data-align="center"] .reader-frame {
   margin: 0 0 0.35rem;
 }
 
+.piece-title {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.55rem;
+}
+
+.reader a.open-original,
+.reader a.open-original:link,
+.reader a.open-original:visited {
+  display: inline-flex;
+  flex: none;
+  margin-top: 0.4rem;
+  color: var(--muted);
+  text-decoration: none;
+}
+
+.reader a.open-original:hover {
+  color: var(--fg);
+}
+
 .reader.paper h1 {
   font-weight: 700;
 }

@@ -5,7 +5,8 @@ import { useEscape } from '../lib/hotkeys.ts'
 import { useActions } from '../lib/hooks.ts'
 import type { Highlight, Item, OpenMode } from '../types/model.ts'
 import { CommentaryList } from './CommentaryQuote.tsx'
-import { openAction } from '../lib/format.ts'
+import { IconExternal } from './Icons.tsx'
+import { isHttpUrl, openAction } from '../lib/format.ts'
 
 interface NavItem {
   id: string
@@ -236,6 +237,18 @@ export const Reader = memo(function Reader({
   return (
     <>
       <article className={item.metadata.kind === 'paper' ? 'reader paper' : 'reader'}>
+        <h1 className="piece-title">
+          <span>{item.title}</span>
+          <a
+            className="open-original"
+            href={item.actionUrl}
+            title="Open original"
+            aria-label="Open original"
+            {...(isHttpUrl(item.actionUrl) ? { target: '_blank', rel: 'noopener noreferrer' } : {})}
+          >
+            <IconExternal size={17} />
+          </a>
+        </h1>
         <div
           ref={ref}
           className="reader-prose"
@@ -300,15 +313,6 @@ export const Reader = memo(function Reader({
       <div className="actionbar">
         <button
           type="button"
-          className={inLater ? 'text-action' : 'text-action primary'}
-          aria-pressed={inLater}
-          title={inLater ? 'In Later' : 'Read later (s)'}
-          onClick={() => (inLater ? removeLater(item.id) : saveLater(item.id))}
-        >
-          {inLater ? 'In Later' : 'Read later'}
-        </button>
-        <button
-          type="button"
           className={isRead ? 'text-action' : 'text-action primary'}
           aria-pressed={isRead}
           title={isRead ? 'Read' : 'Mark read (r)'}
@@ -319,9 +323,6 @@ export const Reader = memo(function Reader({
           }}
         >
           {isRead ? 'Read' : 'Mark read'}
-        </button>
-        <button type="button" className="text-action" title="Open original (o)" onClick={() => openAction(item.actionUrl)}>
-          Open original
         </button>
       </div>
     </>
