@@ -101,7 +101,7 @@ func (s *Server) ingest(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid json")
 		return
 	}
-	items, err := decodeIngest(body)
+	items, prefix, err := decodeIngest(body)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
@@ -115,7 +115,22 @@ func (s *Server) ingest(w http.ResponseWriter, r *http.Request) {
 	for _, result := range results {
 		out = append(out, result.Item)
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"items": out})
+	resp := map[string]any{"items": out}
+	if prefix != "" {
+		keep := make([]string, 0, len(items))
+		for _, item := range items {
+			if strings.HasPrefix(item.ExternalID, prefix) {
+				keep = append(keep, item.ExternalID)
+			}
+		}
+		deleted, err := s.Store.DeleteByExternalIDPrefixExcept(prefix, keep)
+		if err != nil {
+			writeStoreError(w, err)
+			return
+		}
+		resp["deleted"] = deleted
+	}
+	writeJSON(w, http.StatusOK, resp)
 }
 
 func (s *Server) feed(w http.ResponseWriter, r *http.Request) {
@@ -671,36 +686,61 @@ func setStaticCache(w http.ResponseWriter, requestPath, target string) {
 	}
 }
 
-func decodeIngest(body []byte) ([]model.IngestItem, error) {
+func decodeIngest(body []byte) ([]model.IngestItem, string, error) {
 	trimmed := strings.TrimSpace(string(body))
 	if trimmed == "" {
-		return nil, errors.New("empty body")
+		return nil, "", errors.New("empty body")
 	}
 	if strings.HasPrefix(trimmed, "[") {
 		var items []model.IngestItem
 		if err := json.Unmarshal(body, &items); err != nil {
-			return nil, errors.New("invalid json")
+			return nil, "", errors.New("invalid json")
 		}
-		return items, nil
+		return items, "", nil
 	}
 	var probe map[string]json.RawMessage
 	if err := json.Unmarshal(body, &probe); err != nil {
-		return nil, errors.New("invalid json")
+		return nil, "", errors.New("invalid json")
+	}
+	prefix, err := decodeReplaceScope(probe)
+	if err != nil {
+		return nil, "", err
 	}
 	if raw, ok := probe["items"]; ok {
 		if _, single := probe["canonicalUrl"]; !single {
 			var items []model.IngestItem
 			if err := json.Unmarshal(raw, &items); err != nil {
-				return nil, errors.New("invalid json")
+				return nil, "", errors.New("invalid json")
 			}
-			return items, nil
+			return items, prefix, nil
 		}
+	}
+	if prefix != "" {
+		return nil, "", errors.New("replaceScope requires an items array")
 	}
 	var item model.IngestItem
 	if err := json.Unmarshal(body, &item); err != nil {
-		return nil, errors.New("invalid json")
+		return nil, "", errors.New("invalid json")
 	}
-	return []model.IngestItem{item}, nil
+	return []model.IngestItem{item}, "", nil
+}
+
+func decodeReplaceScope(probe map[string]json.RawMessage) (string, error) {
+	raw, ok := probe["replaceScope"]
+	if !ok || strings.TrimSpace(string(raw)) == "" || string(raw) == "null" {
+		return "", nil
+	}
+	var scope struct {
+		ExternalIDPrefix string `json:"externalIdPrefix"`
+	}
+	if err := json.Unmarshal(raw, &scope); err != nil {
+		return "", errors.New("invalid replaceScope")
+	}
+	prefix := strings.TrimSpace(scope.ExternalIDPrefix)
+	if !db.ValidDigestReplacePrefix(prefix) {
+		return "", db.ErrInvalidReplaceScope
+	}
+	return prefix, nil
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
