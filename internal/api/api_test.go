@@ -3,6 +3,7 @@ package api
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -528,4 +529,81 @@ func waitSync(t *testing.T, server *httptest.Server) struct {
 	}
 	t.Fatalf("sync did not finish: %+v", status)
 	return status
+}
+
+func TestIngestReplaceScopeDeletesOrphans(t *testing.T) {
+	server, store := newServer(t, "")
+	defer server.Close()
+	for _, source := range []map[string]any{
+		{"id": "src_papers", "name": "Papers", "sourceType": "papers", "folder": "Papers"},
+		{"id": "src_hn", "name": "HN", "sourceType": "hn", "folder": "HN"},
+	} {
+		res := do(t, server, http.MethodPost, "/v1/sources", "", source)
+		res.Body.Close()
+	}
+
+	seed := []map[string]any{
+		{"sourceId": "src_papers", "externalId": "mldigest:2026-11-27:papers:finedex", "canonicalUrl": "https://arxiv.org/abs/2511.1", "title": "FineDex", "publishedAt": "2026-11-27T22:00:00Z", "initialState": map[string]any{"inLater": true}},
+		{"sourceId": "src_papers", "externalId": "mldigest:2026-11-27:papers:2511.1", "canonicalUrl": "https://arxiv.org/abs/2511.1", "title": "FineDex", "publishedAt": "2026-11-27T22:00:00Z"},
+		{"sourceId": "src_papers", "externalId": "mldigest:2026-11-26:papers:other", "canonicalUrl": "https://example.com/other", "title": "Other day", "publishedAt": "2026-11-26T22:00:00Z"},
+		{"sourceId": "src_hn", "externalId": "hn-99", "canonicalUrl": "https://example.com/hn", "title": "HN stay", "publishedAt": "2026-11-27T22:00:00Z"},
+	}
+	res := do(t, server, http.MethodPost, "/v1/ingest", "", map[string]any{"items": seed})
+	var ingested struct {
+		Items   []model.Item `json:"items"`
+		Deleted int          `json:"deleted"`
+	}
+	decode(t, res, &ingested)
+	if res.StatusCode != http.StatusOK || len(ingested.Items) != 4 {
+		t.Fatalf("seed status %d items %d", res.StatusCode, len(ingested.Items))
+	}
+	var keepID, orphanID, otherID, hnID string
+	for _, item := range ingested.Items {
+		switch item.ExternalID {
+		case "mldigest:2026-11-27:papers:finedex":
+			keepID = item.ID
+		case "mldigest:2026-11-27:papers:2511.1":
+			orphanID = item.ID
+		case "mldigest:2026-11-26:papers:other":
+			otherID = item.ID
+		case "hn-99":
+			hnID = item.ID
+		}
+	}
+
+	bad := do(t, server, http.MethodPost, "/v1/ingest", "", map[string]any{
+		"replaceScope": map[string]any{"externalIdPrefix": "mldigest:"},
+		"items":        []map[string]any{{"sourceId": "src_papers", "externalId": "mldigest:2026-11-27:papers:finedex", "canonicalUrl": "https://arxiv.org/abs/2511.1", "title": "FineDex", "publishedAt": "2026-11-27T22:00:00Z"}},
+	})
+	if bad.StatusCode != http.StatusBadRequest {
+		t.Fatalf("wide scope status %d", bad.StatusCode)
+	}
+	bad.Body.Close()
+
+	res = do(t, server, http.MethodPost, "/v1/ingest", "", map[string]any{
+		"replaceScope": map[string]any{"externalIdPrefix": "mldigest:2026-11-27:"},
+		"items": []map[string]any{
+			{"sourceId": "src_papers", "externalId": "mldigest:2026-11-27:papers:finedex", "canonicalUrl": "https://arxiv.org/abs/2511.1", "title": "FineDex revised", "publishedAt": "2026-11-27T22:00:00Z"},
+		},
+	})
+	decode(t, res, &ingested)
+	if res.StatusCode != http.StatusOK || ingested.Deleted != 1 || len(ingested.Items) != 1 || ingested.Items[0].ID != keepID {
+		t.Fatalf("replace status %d deleted %d items %+v", res.StatusCode, ingested.Deleted, ingested.Items)
+	}
+	if ingested.Items[0].Title != "FineDex revised" {
+		t.Fatalf("title %q", ingested.Items[0].Title)
+	}
+	if _, _, _, _, err := store.GetItem(orphanID); !errors.Is(err, db.ErrNotFound) {
+		t.Fatalf("orphan still present: %v", err)
+	}
+	_, _, state, _, err := store.GetItem(keepID)
+	if err != nil || !state.InLater {
+		t.Fatalf("kept later state %+v %v", state, err)
+	}
+	if _, _, _, _, err := store.GetItem(otherID); err != nil {
+		t.Fatalf("other day gone: %v", err)
+	}
+	if _, _, _, _, err := store.GetItem(hnID); err != nil {
+		t.Fatalf("hn gone: %v", err)
+	}
 }

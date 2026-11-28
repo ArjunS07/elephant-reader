@@ -14,6 +14,11 @@ import (
 
 var ErrNotFound = errors.New("not found")
 
+// ErrInvalidReplaceScope is returned when replaceScope.externalIdPrefix is
+// not exactly "mldigest:YYYY-MM-DD:". That tight form is what stops a
+// replace from touching other sources or other days.
+var ErrInvalidReplaceScope = errors.New("replaceScope.externalIdPrefix must be mldigest:YYYY-MM-DD:")
+
 const rowSelect = `
 SELECT
   i.id, i.source_id, i.external_id, i.canonical_url, i.discussion_url,
@@ -286,6 +291,75 @@ func (s *Store) DeleteSource(id string) error {
 		}
 		return nil
 	})
+}
+
+// ValidDigestReplacePrefix reports whether prefix is exactly mldigest:YYYY-MM-DD:.
+func ValidDigestReplacePrefix(prefix string) bool {
+	const want = len("mldigest:2006-01-02:")
+	if len(prefix) != want || !strings.HasPrefix(prefix, "mldigest:") || !strings.HasSuffix(prefix, ":") {
+		return false
+	}
+	day := prefix[len("mldigest:") : want-1]
+	_, err := time.Parse("2006-01-02", day)
+	return err == nil
+}
+
+// DeleteByExternalIDPrefixExcept deletes items whose external_id starts with
+// prefix, except those whose external_id is in keep. user_item_state and
+// highlights follow via ON DELETE CASCADE. items_fts is a standalone table
+// and is cleared by items.rowid first. Prefix must be mldigest:YYYY-MM-DD:.
+func (s *Store) DeleteByExternalIDPrefixExcept(prefix string, keep []string) (int, error) {
+	if !ValidDigestReplacePrefix(prefix) {
+		return 0, ErrInvalidReplaceScope
+	}
+	kept := make([]string, 0, len(keep))
+	seen := map[string]struct{}{}
+	for _, id := range keep {
+		id = strings.TrimSpace(id)
+		if id == "" {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		kept = append(kept, id)
+	}
+	like := prefix + "%"
+	var deleted int64
+	err := s.withTx(func(tx *sql.Tx) error {
+		if _, err := tx.Exec(`PRAGMA foreign_keys=ON`); err != nil {
+			return err
+		}
+		args := []any{like}
+		notIn := ""
+		if len(kept) > 0 {
+			placeholders := make([]string, len(kept))
+			for i, id := range kept {
+				placeholders[i] = "?"
+				args = append(args, id)
+			}
+			notIn = " AND external_id NOT IN (" + strings.Join(placeholders, ",") + ")"
+		}
+		match := "external_id LIKE ?" + notIn
+		if _, err := tx.Exec(`DELETE FROM items_fts WHERE rowid IN (SELECT rowid FROM items WHERE `+match+`)`, args...); err != nil {
+			return err
+		}
+		res, err := tx.Exec(`DELETE FROM items WHERE `+match, args...)
+		if err != nil {
+			return err
+		}
+		n, err := res.RowsAffected()
+		if err != nil {
+			return err
+		}
+		deleted = n
+		return nil
+	})
+	if err != nil {
+		return 0, err
+	}
+	return int(deleted), nil
 }
 
 func (s *Store) EnsureManualSource() (model.Source, error) {
